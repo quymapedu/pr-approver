@@ -1,5 +1,4 @@
-import { App, Octokit } from "octokit";
-import type { Config } from "./config";
+import { Octokit } from "octokit";
 
 // A minimal structural type so helpers are testable with a fake.
 export interface GitHubClient {
@@ -27,17 +26,6 @@ export interface GitHubClient {
       getAuthenticated(): Promise<{ data: { login: string } }>;
     };
   };
-}
-
-export function makeApp(cfg: Config): App {
-  return new App({ appId: cfg.appId, privateKey: cfg.appPrivateKey });
-}
-
-export async function getInstallationClient(
-  app: App,
-  installationId: number,
-): Promise<GitHubClient> {
-  return (await app.getInstallationOctokit(installationId)) as unknown as GitHubClient;
 }
 
 export function clientForToken(pat: string): GitHubClient {

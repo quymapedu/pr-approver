@@ -1,11 +1,9 @@
 import { loadConfig, type Config } from "../lib/config";
 import { verifySignature } from "../lib/verify";
-import { extractMentions, containsTrigger } from "../lib/parse";
+import { extractMentions, containsKeyword } from "../lib/parse";
 import { decide } from "../lib/decide";
 import { listLogins, getPat } from "../lib/store";
 import {
-  makeApp,
-  getInstallationClient,
   clientForToken,
   getPullRequest,
   approve,
@@ -17,7 +15,6 @@ interface IssueCommentEvent {
   issue: { number: number; pull_request?: unknown; user: { login: string } };
   comment: { body: string };
   repository: { owner: { login: string }; name: string };
-  installation?: { id: number };
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -41,11 +38,8 @@ export default async function handler(req: Request): Promise<Response> {
   if (evt.action !== "created" || !evt.issue?.pull_request) {
     return new Response("ignored", { status: 200 });
   }
-  if (!containsTrigger(evt.comment.body, cfg.triggerMention)) {
+  if (!containsKeyword(evt.comment.body, cfg.triggerKeyword)) {
     return new Response("no trigger", { status: 200 });
-  }
-  if (!evt.installation) {
-    return new Response("no installation", { status: 200 });
   }
 
   const owner = evt.repository.owner.login;
@@ -53,14 +47,12 @@ export default async function handler(req: Request): Promise<Response> {
   const prNumber = evt.issue.number;
 
   try {
-    const app = makeApp(cfg);
-    const appClient = await getInstallationClient(app, evt.installation.id);
-    const { author, baseRef } = await getPullRequest(appClient, owner, repo, prNumber);
+    const botClient = clientForToken(cfg.botPat);
+    const { author, baseRef } = await getPullRequest(botClient, owner, repo, prNumber);
 
     const registeredLogins = await listLogins();
     const result = decide({
       mentions: extractMentions(evt.comment.body),
-      botMention: cfg.triggerMention,
       author,
       baseRef,
       protectedBranches: cfg.protectedBranches,
@@ -69,7 +61,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     if (result.blocked) {
       await postComment(
-        appClient,
+        botClient,
         owner,
         repo,
         prNumber,
@@ -107,7 +99,7 @@ export default async function handler(req: Request): Promise<Response> {
     if (failed.length) lines.push(`❌ ${failed.join("; ")}`);
     if (!lines.length) lines.push("Nobody to approve as — tag a registered reviewer.");
 
-    await postComment(appClient, owner, repo, prNumber, lines.join("\n"));
+    await postComment(botClient, owner, repo, prNumber, lines.join("\n"));
     return new Response("ok", { status: 200 });
   } catch (err) {
     console.error("webhook orchestration failed:", err);

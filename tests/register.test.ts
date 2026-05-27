@@ -14,11 +14,10 @@ import { putPat, delPat } from "../lib/store";
 import { getAuthenticatedLogin } from "../lib/github";
 
 function env() {
-  vi.stubEnv("APP_ID", "1");
-  vi.stubEnv("APP_PRIVATE_KEY", "k");
   vi.stubEnv("WEBHOOK_SECRET", "w");
   vi.stubEnv("ENCRYPTION_KEY", "a".repeat(64));
   vi.stubEnv("SETUP_ACCESS_CODE", "letmein");
+  vi.stubEnv("BOT_PAT", "ghp_bot");
 }
 
 function post(body: unknown): Request {

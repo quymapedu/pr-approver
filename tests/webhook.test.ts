@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHmac } from "node:crypto";
 
-const installClient = { __tag: "install" };
 vi.mock("../lib/github", () => ({
-  makeApp: vi.fn(() => ({})),
-  getInstallationClient: vi.fn(async () => installClient),
   clientForToken: vi.fn((pat: string) => ({ __pat: pat })),
   getPullRequest: vi.fn(async () => ({ author: "alice", baseRef: "feature/x" })),
   approve: vi.fn(async () => {}),
@@ -21,11 +18,10 @@ import { approve, postComment, getPullRequest } from "../lib/github";
 const SECRET = "whsec";
 
 function env() {
-  vi.stubEnv("APP_ID", "1");
-  vi.stubEnv("APP_PRIVATE_KEY", "k");
   vi.stubEnv("WEBHOOK_SECRET", SECRET);
   vi.stubEnv("ENCRYPTION_KEY", "a".repeat(64));
   vi.stubEnv("SETUP_ACCESS_CODE", "code");
+  vi.stubEnv("BOT_PAT", "ghp_bot");
 }
 
 function event(body: string) {
@@ -34,7 +30,6 @@ function event(body: string) {
     issue: { number: 7, pull_request: {}, user: { login: "alice" } },
     comment: { body },
     repository: { owner: { login: "org" }, name: "repo" },
-    installation: { id: 999 },
   };
 }
 
@@ -60,7 +55,7 @@ describe("webhook handler", () => {
   });
 
   it("returns a clean 500 when a required env var is missing", async () => {
-    vi.stubEnv("WEBHOOK_SECRET", ""); // required var now missing
+    vi.stubEnv("WEBHOOK_SECRET", "");
     const res = await handler(
       new Request("https://x/api/webhook", { method: "POST", body: "{}" }),
     );
@@ -69,7 +64,7 @@ describe("webhook handler", () => {
   });
 
   it("rejects a bad signature with 401", async () => {
-    const raw = JSON.stringify(event("@pr-approver-bot @bob"));
+    const raw = JSON.stringify(event("/approve-as @bob"));
     const res = await handler(
       new Request("https://x/api/webhook", {
         method: "POST",
@@ -80,14 +75,14 @@ describe("webhook handler", () => {
     expect(res.status).toBe(401);
   });
 
-  it("no-ops when the trigger is absent", async () => {
+  it("no-ops when the keyword is absent", async () => {
     const res = await handler(signedRequest(event("just chatting @bob")));
     expect(res.status).toBe(200);
     expect(approve).not.toHaveBeenCalled();
   });
 
   it("approves as each registered tagged user and comments", async () => {
-    const res = await handler(signedRequest(event("@pr-approver-bot @bob @carol")));
+    const res = await handler(signedRequest(event("/approve-as @bob @carol")));
     expect(res.status).toBe(200);
     expect(approve).toHaveBeenCalledTimes(2);
     expect(postComment).toHaveBeenCalledOnce();
@@ -97,7 +92,7 @@ describe("webhook handler", () => {
   });
 
   it("skips unregistered users in the summary", async () => {
-    const res = await handler(signedRequest(event("@pr-approver-bot @bob @dan")));
+    const res = await handler(signedRequest(event("/approve-as @bob @dan")));
     expect(approve).toHaveBeenCalledTimes(1);
     const summary = (postComment as any).mock.calls[0][4] as string;
     expect(summary).toContain("@dan");
@@ -106,7 +101,7 @@ describe("webhook handler", () => {
 
   it("refuses protected base branch without approving", async () => {
     (getPullRequest as any).mockResolvedValueOnce({ author: "alice", baseRef: "main" });
-    const res = await handler(signedRequest(event("@pr-approver-bot @bob")));
+    const res = await handler(signedRequest(event("/approve-as @bob")));
     expect(res.status).toBe(200);
     expect(approve).not.toHaveBeenCalled();
     const summary = (postComment as any).mock.calls[0][4] as string;
@@ -117,7 +112,7 @@ describe("webhook handler", () => {
     (approve as any)
       .mockRejectedValueOnce(new Error("401"))
       .mockResolvedValueOnce(undefined);
-    const res = await handler(signedRequest(event("@pr-approver-bot @bob @carol")));
+    const res = await handler(signedRequest(event("/approve-as @bob @carol")));
     expect(res.status).toBe(200);
     expect(approve).toHaveBeenCalledTimes(2);
     const summary = (postComment as any).mock.calls[0][4] as string;
@@ -126,7 +121,7 @@ describe("webhook handler", () => {
 
   it("returns a clean 500 (no stack) when fetching the PR fails", async () => {
     (getPullRequest as any).mockRejectedValueOnce(new Error("boom secret stack"));
-    const res = await handler(signedRequest(event("@pr-approver-bot @bob")));
+    const res = await handler(signedRequest(event("/approve-as @bob")));
     expect(res.status).toBe(500);
     const body = await res.text();
     expect(body).not.toContain("boom secret stack");
