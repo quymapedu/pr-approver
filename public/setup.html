@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PR Approver — Register your token</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
+      label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+      input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+      .row { display: flex; gap: 0.5rem; margin-top: 1.25rem; }
+      button { flex: 1; padding: 0.6rem; font-size: 1rem; cursor: pointer; }
+      #msg { margin-top: 1rem; padding: 0.75rem; border-radius: 0.25rem; display: none; }
+      #msg.ok { background: #e6f4ea; color: #137333; display: block; }
+      #msg.err { background: #fce8e6; color: #c5221f; display: block; }
+      .hint { color: #666; font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Register your GitHub PAT</h1>
+    <p class="hint">
+      Create a fine-grained PAT with <strong>Pull requests: Read and write</strong>
+      on the target repos, then paste it below. We verify it against GitHub and
+      store it under your verified username.
+    </p>
+    <label for="accessCode">Access code</label>
+    <input id="accessCode" type="password" autocomplete="off" />
+    <label for="pat">Personal Access Token</label>
+    <input id="pat" type="password" autocomplete="off" placeholder="github_pat_… or ghp_…" />
+    <div class="row">
+      <button id="register">Register</button>
+      <button id="remove">Remove</button>
+    </div>
+    <div id="msg"></div>
+
+    <script>
+      const msg = document.getElementById("msg");
+      function show(ok, text) {
+        msg.className = ok ? "ok" : "err";
+        msg.textContent = text;
+      }
+      async function send(action) {
+        const accessCode = document.getElementById("accessCode").value;
+        const pat = document.getElementById("pat").value;
+        try {
+          const res = await fetch("/api/register", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action, accessCode, pat }),
+          });
+          const data = await res.json();
+          if (!res.ok) return show(false, data.error || "Request failed");
+          show(true, action === "remove"
+            ? `Removed @${data.login}`
+            : `Registered as @${data.login}`);
+        } catch (e) {
+          show(false, "Network error");
+        }
+      }
+      document.getElementById("register").onclick = () => send("register");
+      document.getElementById("remove").onclick = () => send("remove");
+    </script>
+  </body>
+</html>
