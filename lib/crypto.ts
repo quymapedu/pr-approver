@@ -3,8 +3,15 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
+function assertKey(key: Buffer): void {
+  if (key.length !== 32) {
+    throw new Error(`AES-256 key must be 32 bytes, got ${key.length}`);
+  }
+}
+
 // Layout: base64( iv[12] | authTag[16] | ciphertext )
 export function encrypt(plaintext: string, key: Buffer): string {
+  assertKey(key);
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -13,6 +20,7 @@ export function encrypt(plaintext: string, key: Buffer): string {
 }
 
 export function decrypt(payload: string, key: Buffer): string {
+  assertKey(key);
   const buf = Buffer.from(payload, "base64");
   const iv = buf.subarray(0, IV_LEN);
   const tag = buf.subarray(IV_LEN, IV_LEN + TAG_LEN);
