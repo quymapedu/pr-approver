@@ -3,15 +3,20 @@
 **Date:** 2026-05-27
 **Status:** Approved (design)
 
+> **Update 2026-05-27:** Pivoted from a GitHub App to a plain repo/org webhook
+> with a keyword trigger (`/approve-as`) and a `BOT_PAT` for PR reads + summary
+> comments — installing a GitHub App on the org was blocked. The
+> approve/decide/store/encryption/`/setup` design is unchanged.
+
 ## Purpose
 
-A GitHub App that approves pull requests on behalf of a tagged reviewer, using
-that reviewer's own Personal Access Token (PAT). The intended workflow:
+A webhook-based bot that approves pull requests on behalf of tagged reviewers,
+using each reviewer's own Personal Access Token (PAT). The intended workflow:
 
 1. Author **A** opens a PR.
-2. **A** requests review by commenting and tagging both the bot and reviewer
-   **B**: `@pr-approver-bot @B please review`.
-3. The bot detects its mention, finds **B**'s registered PAT, and submits an
+2. **A** triggers the bot by commenting with the keyword and tagging reviewer
+   **B**: `/approve-as @B`.
+3. The bot detects the keyword, finds **B**'s registered PAT, and submits an
    approving review **as B**.
 
 The bot exists to remove friction in a small, mutually-trusting team. It is not
@@ -46,22 +51,23 @@ Out of scope (YAGNI):
   short-lived serverless functions.
 - Octokit libraries:
   - `@octokit/webhooks` — verify `X-Hub-Signature-256`, parse typed events.
-  - `@octokit/app` — mint an installation token (read PR, post status comment).
-  - `@octokit/rest` — one instance per tagged user, authed with their PAT, used
-    **only** to submit the approving review.
+  - `@octokit/rest` — one instance per user (reviewer PAT) plus one instance
+    for `BOT_PAT` (read PR, post summary comment).
 - Tests: **Vitest**.
 
-## GitHub App configuration
+## Webhook configuration
 
-- **Permissions:** Pull requests → **Read** (fetch the PR and its base branch);
-  Issues → **Write** (post the summary comment — PR-conversation comments are
-  issue comments). Approvals never use the App token; they use the tagged
-  user's PAT.
-- **Webhook events:** Issue comments.
-- **Webhook URL:** the deployed Vercel function (`/api/webhook`).
-- **Webhook secret:** matches `WEBHOOK_SECRET`.
-- A private key is generated and stored as `APP_PRIVATE_KEY`.
-- Installed on the target repos/org.
+Add a webhook in each target repo (or at the org level) pointing at the
+deployed Vercel function:
+
+- **Payload URL:** `https://<domain>/api/webhook`
+- **Content type:** `application/json`
+- **Secret:** matches `WEBHOOK_SECRET`
+- **Events:** Issue comments only (no GitHub App installation required)
+
+A `BOT_PAT` (GitHub PAT, user's own or a machine account) is used by the
+server to read the PR's base branch and post the summary comment. Approvals
+never use `BOT_PAT`; they use each reviewer's registered PAT.
 
 ## Architecture
 
@@ -73,11 +79,11 @@ Three serverless entry points plus pure-logic libraries:
 | `api/register.ts` | HTTP entry for `/setup`: verify access code, verify PAT via `GET /user`, upsert/remove in the DB. |
 | `public/setup.html` | Static paste-PAT form posting to `/api/register`. |
 | `lib/config.ts` | Load + validate env vars; fail fast with clear errors. |
-| `lib/parse.ts` | Extract the trigger mention and all `@mentioned` logins from a comment body. |
+| `lib/parse.ts` | `containsKeyword` checks for the trigger keyword; `extractMentions` pulls all `@mentioned` logins from a comment body. |
 | `lib/decide.ts` | **Pure** decision logic (no I/O). |
 | `lib/store.ts` | Postgres read/write of `login → encrypted PAT`, plus list/remove. |
 | `lib/crypto.ts` | AES-256-GCM encrypt/decrypt using `ENCRYPTION_KEY`. |
-| `lib/github.ts` | Octokit helpers: installation token, `getPullRequest`, `approveAs(pat)`, `postComment`. |
+| `lib/github.ts` | Octokit helpers: `clientForToken(pat)`, `getPullRequest`, `approve`, `postComment`. No installation token; `BOT_PAT` is used directly. |
 
 `parse` and `decide` contain the logic that's easiest to get wrong and are
 fully unit-testable without network or a database.
@@ -86,22 +92,21 @@ fully unit-testable without network or a database.
 
 ```
 issue_comment.created received
-  1. Verify X-Hub-Signature-256          → invalid: 401
-  2. action == "created" and on a PR?    → no: 200 no-op
-  3. body contains TRIGGER_MENTION?      → no: 200 no-op
-  4. parse() → all @mentions in body
+  1. Verify X-Hub-Signature-256              → invalid: 401
+  2. action == "created" and on a PR?        → no: 200 no-op
+  3. body contains TRIGGER_KEYWORD?          → no: 200 no-op
+  4. extractMentions() → all @mentions in body
   5. candidates = mentions
-        minus the bot's own mention
         minus the PR author (GitHub forbids self-approval)
-  6. fetch PR via App installation token → base.ref
+  6. fetch PR via BOT_PAT (clientForToken)   → base.ref
   7. SAFEGUARD: base.ref in PROTECTED_BRANCHES?
         → yes: post "🚫 won't auto-approve PRs into `<branch>`", 200 stop
   8. for each candidate:
         registered in DB?  → no: add to "skipped (no PAT)"
-        yes: decrypt PAT, approveAs(pat)
+        yes: decrypt PAT, approve(clientForToken(pat))
               success → "approved"
               failure → "failed (reason)"   (caught, not fatal)
-  9. post ONE summary comment via App token, e.g.:
+  9. post ONE summary comment via BOT_PAT, e.g.:
         ✅ Approved as @bob, @carol
         ⚠️ Skipped @dan — no PAT registered (visit /setup)
         ❌ @eve — token rejected (401)
@@ -118,7 +123,6 @@ Notes:
 ```
 decide({
   mentions: string[],        // all @logins from the comment
-  botMention: string,        // the trigger login, e.g. "pr-approver-bot"
   author: string,            // PR author login
   baseRef: string,           // PR base branch
   protectedBranches: string[],
@@ -126,14 +130,15 @@ decide({
 }) => {
   blocked: boolean,          // base branch protected
   blockedBranch?: string,
-  approveAs: string[],       // registered, non-author, non-bot
+  approveAs: string[],       // registered, non-author
   skippedNoPat: string[],    // mentioned + eligible but no PAT
 }
 ```
 
 Login comparison is case-insensitive (GitHub logins are case-insensitive). The
-bot mention and author are always excluded before bucketing into
-`approveAs` / `skippedNoPat`.
+PR author is always excluded before bucketing into `approveAs` / `skippedNoPat`.
+There is no `botMention` field — the keyword check happens in the webhook handler
+before `decide` is called.
 
 ## Registration flow (`/api/register`, `/setup`)
 
@@ -170,14 +175,13 @@ buttons; shows the server's success/error message.
 
 | Var | Required | Purpose |
 |---|---|---|
-| `APP_ID` | yes | GitHub App ID |
-| `APP_PRIVATE_KEY` | yes | GitHub App private key (PEM) |
 | `WEBHOOK_SECRET` | yes | Verifies webhook signatures |
 | `ENCRYPTION_KEY` | yes | 32-byte key (base64/hex) for PAT encryption |
 | `SETUP_ACCESS_CODE` | yes | Shared code gating `/api/register` |
+| `BOT_PAT` | yes | PAT used to read PRs and post summary comments |
 | `DATABASE_URL` | yes | Neon connection string, injected by the Neon integration |
 | `PROTECTED_BRANCHES` | no (default `main,master`) | Comma-separated branches the bot refuses |
-| `TRIGGER_MENTION` | no (default app bot login) | The `@name` that triggers the bot |
+| `TRIGGER_KEYWORD` | no (default `/approve-as`) | The keyword phrase that triggers the bot |
 
 `lib/config.ts` validates presence and shape at startup of each invocation and
 throws a clear error if misconfigured.
@@ -211,31 +215,31 @@ tests (the `store` test mocks `@neondatabase/serverless` with an in-memory
 
 ## Setup steps (also goes in README)
 
-1. **Create the GitHub App** (Settings → Developer settings → GitHub Apps):
-   set webhook URL to the Vercel deployment `/api/webhook`, set a webhook
-   secret, grant permissions (Pull requests: **Read**, Issues: **Write** —
-   the App only reads PRs and posts the summary comment; approvals use PATs),
-   subscribe to **Issue comments**, generate a private key.
-2. **Install the App** on the target repos/org.
-3. **Create the Vercel project**, link this repo, add a **Neon** database from
-   the Marketplace (Storage → Create → Neon). This injects `DATABASE_URL`.
-4. **Create the schema** in Neon's SQL editor:
-   `CREATE TABLE IF NOT EXISTS pats (login text PRIMARY KEY, ciphertext text NOT NULL);`
-5. **Set env vars** in Vercel: `APP_ID`, `APP_PRIVATE_KEY`, `WEBHOOK_SECRET`,
-   `ENCRYPTION_KEY`, `SETUP_ACCESS_CODE`, `PROTECTED_BRANCHES` (optional),
-   `TRIGGER_MENTION` (optional). `DATABASE_URL` is injected by the integration.
-6. **Deploy.**
-7. **Each teammate registers a PAT:** create a fine-grained PAT scoped to the
+1. **Create the Vercel project + Neon DB**: Storage → Create → Neon (injects
+   `DATABASE_URL`); run the schema in Neon's SQL editor; do an initial deploy
+   to get the domain.
+2. **Create a `BOT_PAT`**: a GitHub PAT (user's own or a dedicated machine
+   account) with **Pull requests: Read and write** on the target repos. Summary
+   comments will appear as this account.
+3. **Set env vars** in Vercel: `WEBHOOK_SECRET`, `ENCRYPTION_KEY`,
+   `SETUP_ACCESS_CODE`, `BOT_PAT`, `PROTECTED_BRANCHES` (optional),
+   `TRIGGER_KEYWORD` (optional). `DATABASE_URL` is injected by the integration.
+   Redeploy after setting vars.
+4. **Add the webhook**: repo Settings → Webhooks → Add webhook → Payload URL
+   `https://<domain>/api/webhook`, Content type `application/json`, Secret =
+   `WEBHOOK_SECRET`, "Let me select individual events" → check **Issue comments**
+   only. Org-wide: org Settings → Webhooks (needs org admin).
+5. **Each teammate registers a PAT:** create a fine-grained PAT scoped to the
    repos with **Pull requests: Read and write**, then visit `/setup`, enter the
    access code + PAT, click Register.
-8. **Test:** open a PR into a non-protected branch and comment
-   `@pr-approver-bot @teammate`.
+6. **Test:** open a PR into a non-protected branch and comment
+   `/approve-as @teammate`.
 
 ## Acceptance Criteria
 
 - [ ] Webhook verifies the GitHub signature and rejects invalid ones with 401.
-- [ ] Bot triggers only on `issue_comment.created` on a PR containing the
-      trigger mention.
+- [ ] Bot triggers only on `issue_comment.created` on a PR whose comment body
+      contains the trigger keyword (default `/approve-as`).
 - [ ] Bot approves as every other registered, non-author user tagged in the
       comment, using their PAT.
 - [ ] Bot never approves PRs whose base branch is in `PROTECTED_BRANCHES`
