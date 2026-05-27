@@ -46,6 +46,14 @@ export async function handler(req: Request): Promise<Response> {
     return json(403, { error: "Invalid access code" });
   }
   if (!pat) return json(400, { error: "Missing pat" });
+  // Classic tokens only: fine-grained tokens (github_pat_…) are blocked by org
+  // policy in our setup and fail at approval time, so reject them up front.
+  if (pat.startsWith("github_pat_")) {
+    return json(400, {
+      error:
+        "Fine-grained tokens are not supported. Create a classic token with the 'repo' scope.",
+    });
+  }
 
   let login: string;
   try {

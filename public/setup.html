@@ -19,14 +19,16 @@
   <body>
     <h1>Register your GitHub PAT</h1>
     <p class="hint">
-      Create a fine-grained PAT with <strong>Pull requests: Read and write</strong>
-      on the target repos, then paste it below. We verify it against GitHub and
-      store it under your verified username.
+      Create a <strong>classic</strong> Personal Access Token with the
+      <strong>repo</strong> scope
+      (<a href="https://github.com/settings/tokens/new?scopes=repo&description=PR%20Approver" target="_blank" rel="noopener">create one here</a>),
+      then paste it below. We verify it against GitHub and store it under your
+      verified username. Fine-grained tokens are not supported.
     </p>
     <label for="accessCode">Access code</label>
     <input id="accessCode" type="password" autocomplete="off" />
     <label for="pat">Personal Access Token</label>
-    <input id="pat" type="password" autocomplete="off" placeholder="github_pat_… or ghp_…" />
+    <input id="pat" type="password" autocomplete="off" placeholder="ghp_…" />
     <label for="slackUserId">Slack member ID <span class="hint">(optional, for Slack approvals)</span></label>
     <input id="slackUserId" type="text" autocomplete="off" placeholder="e.g. U01ABCDEFG" />
     <div class="row">

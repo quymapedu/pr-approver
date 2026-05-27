@@ -51,6 +51,15 @@ describe("register handler", () => {
     expect(putPat).not.toHaveBeenCalled();
   });
 
+  it("rejects a fine-grained token with 400 before calling GitHub", async () => {
+    const res = await handler(
+      post({ action: "register", accessCode: "letmein", pat: "github_pat_11ABCDEF" }),
+    );
+    expect(res.status).toBe(400);
+    expect(getAuthenticatedLogin).not.toHaveBeenCalled();
+    expect(putPat).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid PAT with 401", async () => {
     (getAuthenticatedLogin as any).mockRejectedValueOnce(new Error("bad"));
     const res = await handler(post({ action: "register", accessCode: "letmein", pat: "bad" }));
