@@ -26,7 +26,7 @@ In scope:
 - A single webhook endpoint that reacts to PR comments and approves as the
   tagged user(s).
 - A self-service `/setup` page where teammates register/remove their own PAT.
-- Encrypted-at-rest PAT storage in Vercel KV.
+- Encrypted-at-rest PAT storage in Neon (serverless Postgres).
 - The protected-branch safeguard.
 
 Out of scope (YAGNI):
@@ -38,10 +38,12 @@ Out of scope (YAGNI):
 
 ## Hosting & stack
 
-- **Vercel free tier**, Node serverless functions (`@vercel/node`). No
+- **Vercel free tier**, Node serverless functions (Fetch-API handlers). No
   long-running server.
 - **TypeScript.**
-- **Vercel KV** (Upstash Redis, free tier) for PAT storage.
+- **Neon** (serverless Postgres, free tier) for PAT storage, via the
+  `@neondatabase/serverless` HTTP driver — no TCP connection pooling concerns in
+  short-lived serverless functions.
 - Octokit libraries:
   - `@octokit/webhooks` — verify `X-Hub-Signature-256`, parse typed events.
   - `@octokit/app` — mint an installation token (read PR, post status comment).
@@ -68,17 +70,17 @@ Three serverless entry points plus pure-logic libraries:
 | File | Responsibility |
 |---|---|
 | `api/webhook.ts` | HTTP entry for GitHub webhooks: verify signature, route, orchestrate the approve flow. |
-| `api/register.ts` | HTTP entry for `/setup`: verify access code, verify PAT via `GET /user`, upsert/remove in KV. |
+| `api/register.ts` | HTTP entry for `/setup`: verify access code, verify PAT via `GET /user`, upsert/remove in the DB. |
 | `public/setup.html` | Static paste-PAT form posting to `/api/register`. |
 | `lib/config.ts` | Load + validate env vars; fail fast with clear errors. |
 | `lib/parse.ts` | Extract the trigger mention and all `@mentioned` logins from a comment body. |
 | `lib/decide.ts` | **Pure** decision logic (no I/O). |
-| `lib/store.ts` | KV read/write of `login → encrypted PAT`, plus list/remove. |
+| `lib/store.ts` | Postgres read/write of `login → encrypted PAT`, plus list/remove. |
 | `lib/crypto.ts` | AES-256-GCM encrypt/decrypt using `ENCRYPTION_KEY`. |
 | `lib/github.ts` | Octokit helpers: installation token, `getPullRequest`, `approveAs(pat)`, `postComment`. |
 
 `parse` and `decide` contain the logic that's easiest to get wrong and are
-fully unit-testable without network or KV.
+fully unit-testable without network or a database.
 
 ## Webhook flow (`/api/webhook`)
 
@@ -95,7 +97,7 @@ issue_comment.created received
   7. SAFEGUARD: base.ref in PROTECTED_BRANCHES?
         → yes: post "🚫 won't auto-approve PRs into `<branch>`", 200 stop
   8. for each candidate:
-        registered in KV?  → no: add to "skipped (no PAT)"
+        registered in DB?  → no: add to "skipped (no PAT)"
         yes: decrypt PAT, approveAs(pat)
               success → "approved"
               failure → "failed (reason)"   (caught, not fatal)
@@ -120,7 +122,7 @@ decide({
   author: string,            // PR author login
   baseRef: string,           // PR base branch
   protectedBranches: string[],
-  registeredLogins: string[] // who has a PAT in KV
+  registeredLogins: string[] // who has a PAT in the DB
 }) => {
   blocked: boolean,          // base branch protected
   blockedBranch?: string,
@@ -154,12 +156,15 @@ buttons; shows the server's success/error message.
 
 ## Storage & encryption
 
-- KV key shape: `pat:<login>` → AES-256-GCM ciphertext (iv + authTag + data,
-  base64).
+- Single table `pats(login text primary key, ciphertext text not null)`. The
+  `ciphertext` is the AES-256-GCM blob (iv + authTag + data, base64). The
+  encryption key never lives in the database.
+- `login` is the primary key, so register is an idempotent upsert
+  (`INSERT … ON CONFLICT (login) DO UPDATE`).
 - `lib/crypto.ts` uses Node `crypto` with a 32-byte key from `ENCRYPTION_KEY`
   (base64 or hex). Random 12-byte IV per write.
-- `store.listLogins()` returns registered logins (for the webhook's KV lookups
-  / "skipped" messaging) without ever returning plaintext tokens.
+- `store.listLogins()` returns registered logins (for the webhook's lookups /
+  "skipped" messaging) without ever returning plaintext tokens.
 
 ## Configuration (env vars)
 
@@ -170,8 +175,7 @@ buttons; shows the server's success/error message.
 | `WEBHOOK_SECRET` | yes | Verifies webhook signatures |
 | `ENCRYPTION_KEY` | yes | 32-byte key (base64/hex) for PAT encryption |
 | `SETUP_ACCESS_CODE` | yes | Shared code gating `/api/register` |
-| `KV_REST_API_URL` | yes | Injected by Vercel KV integration |
-| `KV_REST_API_TOKEN` | yes | Injected by Vercel KV integration |
+| `DATABASE_URL` | yes | Neon connection string, injected by the Neon integration |
 | `PROTECTED_BRANCHES` | no (default `main,master`) | Comma-separated branches the bot refuses |
 | `TRIGGER_MENTION` | no (default app bot login) | The `@name` that triggers the bot |
 
@@ -185,7 +189,7 @@ throws a clear error if misconfigured.
 - PR fetch failure → log, return **500** (GitHub may retry; acceptable).
 - Per-user approve failure (expired/invalid PAT, self-approval 422, etc.) →
   caught per user, reported in the summary comment, never aborts the others.
-- `/api/register`: wrong access code → 403; invalid PAT → 401; KV failure → 500.
+- `/api/register`: wrong access code → 403; invalid PAT → 401; DB failure → 500.
 
 ## Testing
 
@@ -202,7 +206,8 @@ Vitest unit tests:
   `@octokit/webhooks` verify).
 
 `github.ts` network calls are exercised via mocked Octokit in handler-level
-tests; the live GitHub/KV integration is validated manually in setup.
+tests (the `store` test mocks `@neondatabase/serverless` with an in-memory
+`query()`); the live GitHub/Neon integration is validated manually in setup.
 
 ## Setup steps (also goes in README)
 
@@ -212,15 +217,18 @@ tests; the live GitHub/KV integration is validated manually in setup.
    the App only reads PRs and posts the summary comment; approvals use PATs),
    subscribe to **Issue comments**, generate a private key.
 2. **Install the App** on the target repos/org.
-3. **Create the Vercel project**, link this repo, add the **Vercel KV** store.
-4. **Set env vars** in Vercel: `APP_ID`, `APP_PRIVATE_KEY`, `WEBHOOK_SECRET`,
+3. **Create the Vercel project**, link this repo, add a **Neon** database from
+   the Marketplace (Storage → Create → Neon). This injects `DATABASE_URL`.
+4. **Create the schema** in Neon's SQL editor:
+   `CREATE TABLE IF NOT EXISTS pats (login text PRIMARY KEY, ciphertext text NOT NULL);`
+5. **Set env vars** in Vercel: `APP_ID`, `APP_PRIVATE_KEY`, `WEBHOOK_SECRET`,
    `ENCRYPTION_KEY`, `SETUP_ACCESS_CODE`, `PROTECTED_BRANCHES` (optional),
-   `TRIGGER_MENTION` (optional). KV vars are injected by the integration.
-5. **Deploy.**
-6. **Each teammate registers a PAT:** create a fine-grained PAT scoped to the
+   `TRIGGER_MENTION` (optional). `DATABASE_URL` is injected by the integration.
+6. **Deploy.**
+7. **Each teammate registers a PAT:** create a fine-grained PAT scoped to the
    repos with **Pull requests: Read and write**, then visit `/setup`, enter the
    access code + PAT, click Register.
-7. **Test:** open a PR into a non-protected branch and comment
+8. **Test:** open a PR into a non-protected branch and comment
    `@pr-approver-bot @teammate`.
 
 ## Acceptance Criteria
@@ -238,7 +246,7 @@ tests; the live GitHub/KV integration is validated manually in setup.
 - [ ] A per-user approval failure does not prevent the others from succeeding.
 - [ ] `/setup` registers a PAT under the login returned by `GET /user`, gated
       by the access code.
-- [ ] PATs are stored encrypted (AES-256-GCM) in Vercel KV.
+- [ ] PATs are stored encrypted (AES-256-GCM) in Neon Postgres.
 - [ ] A user can remove their own PAT via `/setup`.
 - [ ] Unit tests cover `parse`, `decide`, `config`, `crypto`, and signature
       verification.
