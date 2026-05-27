@@ -196,9 +196,10 @@ export async function handler(req: Request): Promise<Response> {
     })(),
   );
 
-  // Ack within Slack's 3s window.
+  // Ack within Slack's 3s window. in_channel so Slack echoes the user's
+  // command into the channel publicly and the ack/summary are visible to all.
   return new Response(
-    JSON.stringify({ response_type: "ephemeral", text: "⏳ Working on it…" }),
+    JSON.stringify({ response_type: "in_channel", text: "⏳ Working on it…" }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }
