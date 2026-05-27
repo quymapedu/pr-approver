@@ -1,4 +1,5 @@
 {
+  "cleanUrls": true,
   "functions": {
     "api/*.ts": {
       "runtime": "@vercel/node@5.1.0"
