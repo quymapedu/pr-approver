@@ -1,101 +1,84 @@
-# PR Approver Bot
+# PR Approver Bot (Slack)
 
-A webhook-based bot (hosted on Vercel) that approves a pull request on behalf
-of tagged reviewers, using each reviewer's own Personal Access Token.
+A Slack slash command that approves a GitHub pull request on behalf of tagged
+reviewers, using each reviewer's own Personal Access Token.
 
-Write a keyword + reviewer tag in any PR comment:
+In Slack:
 
 ```
-/approve-as @teammate
+/approve-as https://github.com/org/repo/pull/123 @bob @carol
 ```
 
-The bot submits an approving review **as `@teammate`** (using their registered
-PAT) — for every registered, non-author `@`-mentioned user in the comment.
+The bot resolves each tagged Slack user to their linked GitHub login and submits
+an approving review **as each of them**, then replies in-channel with a summary.
 
 > **Safeguard:** the bot never approves PRs whose base branch is protected
-> (default `main`, `master`). Configure via `PROTECTED_BRANCHES`.
+> (default `main`, `master`).
 
-> **Trust note:** anyone who can comment on the PR can cause an approving
-> review to be submitted as a colleague who registered a PAT. Use only within
-> a trusting team, and rely on branch protection for `main`.
+> **Trust note:** anyone who can run the command can cause an approving review
+> to be submitted as a colleague who registered a PAT. Use only within a
+> trusting team, and rely on branch protection for `main`.
 
 ## Setup
 
-### 1. Create the Vercel project + Neon database
+### 1. Vercel project + Neon database
 
 - Import this repo into Vercel.
-- Add a **Neon** database (Storage → Create → Neon) and connect it to the
-  project. This injects `DATABASE_URL` automatically.
-- In Neon's SQL editor, create the table once:
+- Add a **Neon** database (Storage → Create → Neon); it injects `DATABASE_URL`.
+- In Neon's SQL editor, create both tables:
 
   ```sql
   CREATE TABLE IF NOT EXISTS pats (
     login      text PRIMARY KEY,
     ciphertext text NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS slack_links (
+    slack_user_id text PRIMARY KEY,
+    login         text NOT NULL
+  );
   ```
-
-- Do an initial deploy to get your Vercel domain (`https://<domain>.vercel.app`).
+- Deploy once to get your domain (`https://<app>.vercel.app`).
 
 ### 2. Create a BOT_PAT
 
-Create a GitHub Personal Access Token that the server will use to read PR
-details and post summary comments. This can be your own PAT or a dedicated
-machine account's PAT. It needs access to the target repos with:
+A GitHub PAT (your own or a machine account) with **Pull requests: Read** on the
+target repos — it only reads PRs (base branch + author).
 
-- **Pull requests: Read and write** (reads the PR base branch; posts the
-  summary comment)
+### 3. Create the Slack app
 
-> Note: summary comments will appear as whichever GitHub account owns this PAT.
+- api.slack.com/apps → Create New App → From scratch → pick your workspace.
+- **Slash Commands → Create New Command:**
+  - Command: `/approve-as`
+  - Request URL: `https://<app>.vercel.app/api/slack`
+  - Enable **"Escape channels, users, and links sent to your app"**.
+- **Basic Information → App Credentials → Signing Secret** → this is `SLACK_SIGNING_SECRET`.
+- Install the app to your workspace.
 
-### 3. Set environment variables in Vercel
+### 4. Configure Vercel env vars (then redeploy)
 
 | Var | Value |
 |---|---|
-| `WEBHOOK_SECRET` | the secret you also put in the GitHub webhook config |
+| `SLACK_SIGNING_SECRET` | from the Slack app's Basic Information |
+| `BOT_PAT` | the PAT from step 2 |
 | `ENCRYPTION_KEY` | 32-byte key: `openssl rand -hex 32` |
 | `SETUP_ACCESS_CODE` | a shared code your team uses on `/setup` |
-| `BOT_PAT` | PAT used to read PRs and post summary comments |
 | `PROTECTED_BRANCHES` | *(optional)* comma list, default `main,master` |
-| `TRIGGER_KEYWORD` | *(optional)* trigger phrase, default `/approve-as` |
 
-(`DATABASE_URL` is injected automatically by the Neon integration.)
+(`DATABASE_URL` is injected by Neon.)
 
-After setting vars, redeploy so the new values take effect.
+### 5. Register + link (each teammate)
 
-### 4. Add the webhook
+1. Create a fine-grained PAT with **Pull requests: Read and write** on the repos.
+2. Find your Slack member ID: Slack profile → ⋮ (More) → **Copy member ID**.
+3. Visit `https://<app>.vercel.app/setup`, enter the access code, your PAT, and
+   your Slack member ID, click **Register**.
 
-In each target repo → **Settings → Webhooks → Add webhook**:
-
-- **Payload URL:** `https://<your-domain>/api/webhook`
-- **Content type:** `application/json`
-- **Secret:** your `WEBHOOK_SECRET` value
-- **Which events:** "Let me select individual events" → check **Issue comments** only
-- Click **Add webhook**
-
-For org-wide coverage: org **Settings → Webhooks**, same fields — requires org
-admin permissions.
-
-### 5. Register reviewer PATs
-
-Each teammate:
-
-1. Creates a fine-grained PAT scoped to the target repos with
-   **Pull requests: Read and write**.
-2. Visits `https://<your-domain>/setup`.
-3. Enters the access code + PAT and clicks **Register**.
-
-To revoke: same page, click **Remove** (or delete the PAT on GitHub).
+To revoke: same page, **Remove** (or delete the PAT on GitHub).
 
 ### 6. Test
 
-Open a PR into a non-protected branch and comment:
-
-```
-/approve-as @teammate
-```
-
-The bot replies with a summary of who it approved as.
+In Slack: `/approve-as https://github.com/org/repo/pull/<n> @teammate` into a
+non-protected branch. The bot replies with a summary and the approval appears.
 
 ## Development
 
