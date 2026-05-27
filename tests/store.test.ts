@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 
 const mem = new Map<string, string>(); // login -> ciphertext
 
-// Minimal in-memory stand-in for Neon's sql.query(text, params) -> rows[].
+// Minimal in-memory stand-in for Neon's direct-call form sql(text, params) -> rows[].
 const query = vi.fn(async (text: string, params: unknown[] = []) => {
   if (text.includes("INSERT INTO pats")) {
     mem.set(params[0] as string, params[1] as string);
