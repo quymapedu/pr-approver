@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
-import { loadConfig, type Config } from "../lib/config";
-import { putPat, delPat, putSlackLink, delSlackLink } from "../lib/store";
-import { clientForToken, getAuthenticatedLogin } from "../lib/github";
+import { loadConfig, type Config } from "../lib/config.js";
+import { putPat, delPat, putSlackLink, delSlackLink } from "../lib/store.js";
+import { clientForToken, getAuthenticatedLogin } from "../lib/github.js";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {

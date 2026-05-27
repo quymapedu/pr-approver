@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { encrypt, decrypt } from "./crypto";
+import { encrypt, decrypt } from "./crypto.js";
 
 const norm = (login: string) => login.toLowerCase();
 

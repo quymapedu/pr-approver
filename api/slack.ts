@@ -1,9 +1,9 @@
 import { waitUntil } from "@vercel/functions";
-import { loadConfig, type Config } from "../lib/config";
-import { verifySlackSignature, parsePrUrl, parseSlackUserIds } from "../lib/slack";
-import { decide } from "../lib/decide";
-import { listLogins, getPat, getLoginForSlack } from "../lib/store";
-import { clientForToken, getPullRequest, approve } from "../lib/github";
+import { loadConfig, type Config } from "../lib/config.js";
+import { verifySlackSignature, parsePrUrl, parseSlackUserIds } from "../lib/slack.js";
+import { decide } from "../lib/decide.js";
+import { listLogins, getPat, getLoginForSlack } from "../lib/store.js";
+import { clientForToken, getPullRequest, approve } from "../lib/github.js";
 
 interface ProcessInput {
   pr: { owner: string; repo: string; number: number } | null;
