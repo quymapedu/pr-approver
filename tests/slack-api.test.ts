@@ -25,6 +25,7 @@ vi.mock("../lib/store", () => ({
 
 import { handler, processApproval } from "../api/slack";
 import { approve, getPullRequest, tryGetPullRequest } from "../lib/github";
+import { getPat } from "../lib/store";
 import type { Config } from "../lib/config";
 
 const SECRET = "slacksecret";
@@ -33,12 +34,10 @@ function env() {
   vi.stubEnv("SLACK_SIGNING_SECRET", SECRET);
   vi.stubEnv("ENCRYPTION_KEY", "a".repeat(64));
   vi.stubEnv("SETUP_ACCESS_CODE", "code");
-  vi.stubEnv("BOT_PAT", "ghp_bot");
 }
 
 const cfg: Config = {
   slackSigningSecret: SECRET,
-  botPat: "ghp_bot",
   encryptionKey: Buffer.alloc(32, 1),
   setupAccessCode: "code",
   protectedBranches: ["main", "master"],
@@ -157,6 +156,31 @@ describe("processApproval", () => {
     });
     expect(approve).not.toHaveBeenCalled();
     expect(summary.toLowerCase()).toContain("couldn't find");
+  });
+
+  it("asks reviewers to register when none have a stored PAT", async () => {
+    (getPat as any).mockResolvedValueOnce(null); // bob has no PAT
+    const summary = await processApproval({
+      ref: { owner: "org", repo: "repo", number: 7 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+    });
+    expect(getPullRequest).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+    expect(summary).toContain("/setup");
+  });
+
+  it("points to /setup when the reviewer's token can't read the PR", async () => {
+    (getPullRequest as any).mockRejectedValueOnce(
+      Object.assign(new Error("Not Found"), { status: 404 }),
+    );
+    const summary = await processApproval({
+      ref: { owner: "org", repo: "repo", number: 7 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+    });
+    expect(approve).not.toHaveBeenCalled();
+    expect(summary).toContain("/setup");
   });
 });
 

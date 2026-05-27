@@ -52,15 +52,11 @@ an approving review **as each of them**, then replies in-channel with a summary.
   ```
 - Deploy once to get your domain (`https://<app>.vercel.app`).
 
-### 2. Create a BOT_PAT
+> There is no bot token. The PR is read using one of the tagged reviewers' own
+> registered PATs, and approvals use each reviewer's PAT — so every reviewer
+> just needs a classic token with the `repo` scope (step 4).
 
-A **classic** GitHub PAT (your own or a machine account) with the **`repo`**
-scope. It only reads PRs (base branch + author) and probes repos for bare PR
-numbers, but classic tokens need full `repo` to see private repos. The account
-must have access to the target repos. (Fine-grained tokens require org opt-in
-that isn't enabled here, so they 404 — use a classic token.)
-
-### 3. Create the Slack app
+### 2. Create the Slack app
 
 - api.slack.com/apps → Create New App → From scratch → pick your workspace.
 - **Slash Commands → Create New Command:**
@@ -70,12 +66,11 @@ that isn't enabled here, so they 404 — use a classic token.)
 - **Basic Information → App Credentials → Signing Secret** → this is `SLACK_SIGNING_SECRET`.
 - Install the app to your workspace.
 
-### 4. Configure Vercel env vars (then redeploy)
+### 3. Configure Vercel env vars (then redeploy)
 
 | Var | Value |
 |---|---|
 | `SLACK_SIGNING_SECRET` | from the Slack app's Basic Information |
-| `BOT_PAT` | the PAT from step 2 |
 | `ENCRYPTION_KEY` | 32-byte key: `openssl rand -hex 32` |
 | `SETUP_ACCESS_CODE` | a shared code your team uses on `/setup` |
 | `PROTECTED_BRANCHES` | *(optional)* comma list, default `main,master` |
@@ -84,7 +79,7 @@ that isn't enabled here, so they 404 — use a classic token.)
 
 (`DATABASE_URL` is injected by Neon.)
 
-### 5. Register + link (each teammate)
+### 4. Register + link (each teammate)
 
 1. Create a **classic** PAT with the **`repo`** scope
    ([create one here](https://github.com/settings/tokens/new?scopes=repo&description=PR%20Approver)).
@@ -95,7 +90,7 @@ that isn't enabled here, so they 404 — use a classic token.)
 
 To revoke: same page, **Remove** (or delete the PAT on GitHub).
 
-### 6. Test
+### 5. Test
 
 In Slack: `/approve <pr> @teammate` (any PR form above — e.g. a bare
 `1164`) targeting a non-protected branch. The bot replies with a summary and

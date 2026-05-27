@@ -1,6 +1,5 @@
 export interface Config {
   slackSigningSecret: string;
-  botPat: string;
   encryptionKey: Buffer;
   setupAccessCode: string;
   protectedBranches: string[];
@@ -47,7 +46,6 @@ export function loadConfig(
 
   return {
     slackSigningSecret: required(env, "SLACK_SIGNING_SECRET"),
-    botPat: required(env, "BOT_PAT"),
     encryptionKey: parseKey(required(env, "ENCRYPTION_KEY")),
     setupAccessCode: required(env, "SETUP_ACCESS_CODE"),
     protectedBranches: protectedRaw

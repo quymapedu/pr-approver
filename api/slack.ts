@@ -54,7 +54,7 @@ async function resolveTarget(
 
   if (matches.length === 0) {
     return {
-      error: `⚠️ Couldn't find an open PR #${ref.number} in any configured repo. Try \`<repo>/pull/${ref.number}\`.`,
+      error: `⚠️ Couldn't find an open PR #${ref.number} in any configured repo. It may not exist, or the reviewer's token lacks access — try \`<repo>/pull/${ref.number}\` or check /setup.`,
     };
   }
   if (matches.length > 1) {
@@ -88,8 +88,37 @@ export async function processApproval(input: ProcessInput): Promise<string> {
     else notLinked.push(id);
   }
 
-  const botClient = clientForToken(cfg.botPat);
-  const target = await resolveTarget(ref, botClient, cfg);
+  // Read the PR using one of the tagged reviewers' own PATs — there is no bot
+  // token. Use the first resolved reviewer who has a stored PAT.
+  let readClient: GitHubClient | null = null;
+  let readLogin = "";
+  for (const login of resolved) {
+    const pat = await getPat(login, cfg.encryptionKey);
+    if (pat) {
+      readClient = clientForToken(pat);
+      readLogin = login;
+      break;
+    }
+  }
+  if (!readClient) {
+    const lines = [
+      "⚠️ None of the tagged reviewers have a registered token, so I can't read the PR.",
+    ];
+    if (notLinked.length) {
+      lines.push(
+        `Not linked: ${notLinked.map((id) => `<@${id}>`).join(", ")}`,
+      );
+    }
+    lines.push("Register a classic PAT (with the `repo` scope) at /setup.");
+    return lines.join("\n");
+  }
+
+  let target: Awaited<ReturnType<typeof resolveTarget>>;
+  try {
+    target = await resolveTarget(ref, readClient, cfg);
+  } catch {
+    return `❌ Couldn't read the PR with @${readLogin}'s token — it likely lacks access to the repo. Re-register a classic token with the \`repo\` scope at /setup.`;
+  }
   if ("error" in target) return target.error;
   const { owner, repo, number, author, baseRef } = target;
 
