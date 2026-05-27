@@ -1,9 +1,11 @@
 export interface Config {
   slackSigningSecret: string;
+  // Bot token (xoxb-…) used to post replies via chat.postMessage.
+  slackBotToken: string;
   encryptionKey: Buffer;
   setupAccessCode: string;
   protectedBranches: string[];
-  // Used to expand short PR references in /approve-as.
+  // Used to expand short PR references when the bot is @-mentioned.
   defaultOwner: string;
   // Repos probed when the user gives a bare PR number (no repo).
   repos: string[];
@@ -46,6 +48,7 @@ export function loadConfig(
 
   return {
     slackSigningSecret: required(env, "SLACK_SIGNING_SECRET"),
+    slackBotToken: required(env, "SLACK_BOT_TOKEN"),
     encryptionKey: parseKey(required(env, "ENCRYPTION_KEY")),
     setupAccessCode: required(env, "SETUP_ACCESS_CODE"),
     protectedBranches: protectedRaw

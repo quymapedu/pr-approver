@@ -20,6 +20,8 @@ interface ProcessInput {
   ref: PrRef | null;
   slackUserIds: string[];
   cfg: Config;
+  // Absolute base URL of this deployment, so /setup links are clickable.
+  appBaseUrl: string;
 }
 
 // A PR reference is either fully specified (owner/repo/number) or just a number
@@ -29,6 +31,7 @@ async function resolveTarget(
   ref: PrRef,
   readClient: GitHubClient,
   cfg: Config,
+  setup: string,
 ): Promise<
   | { owner: string; repo: string; number: number; author: string; baseRef: string }
   | { error: string }
@@ -54,7 +57,7 @@ async function resolveTarget(
 
   if (matches.length === 0) {
     return {
-      error: `⚠️ Couldn't find an open PR #${ref.number} in any configured repo. It may not exist, or the reviewer's token lacks access — try \`<repo>/pull/${ref.number}\` or check /setup.`,
+      error: `⚠️ Couldn't find an open PR #${ref.number} in any configured repo. It may not exist, or the reviewer's token lacks access — try \`<repo>/pull/${ref.number}\` or check ${setup}.`,
     };
   }
   if (matches.length > 1) {
@@ -75,9 +78,10 @@ async function resolveTarget(
 }
 
 export async function processApproval(input: ProcessInput): Promise<string> {
-  const { ref, slackUserIds, cfg } = input;
+  const { ref, slackUserIds, cfg, appBaseUrl } = input;
+  const setup = appBaseUrl ? `${appBaseUrl}/setup` : "/setup";
   if (!ref) {
-    return "⚠️ Couldn't find a PR in your command. Usage: `/approve <pr-url | repo/pull/N | N> @user`";
+    return `⚠️ I couldn't find a PR. Mention me with a PR and reviewers, e.g. \`@approver 1164 @bob\` (or a full URL / \`repo/pull/N\`).`;
   }
 
   const resolved: string[] = [];
@@ -109,15 +113,15 @@ export async function processApproval(input: ProcessInput): Promise<string> {
         `Not linked: ${notLinked.map((id) => `<@${id}>`).join(", ")}`,
       );
     }
-    lines.push("Register a classic PAT (with the `repo` scope) at /setup.");
+    lines.push(`Register a classic PAT (with the \`repo\` scope) at ${setup}.`);
     return lines.join("\n");
   }
 
   let target: Awaited<ReturnType<typeof resolveTarget>>;
   try {
-    target = await resolveTarget(ref, readClient, cfg);
+    target = await resolveTarget(ref, readClient, cfg, setup);
   } catch {
-    return `❌ Couldn't read the PR with @${readLogin}'s token — it likely lacks access to the repo. Re-register a classic token with the \`repo\` scope at /setup.`;
+    return `❌ Couldn't read the PR with @${readLogin}'s token — it likely lacks access to the repo. Re-register a classic token with the \`repo\` scope at ${setup}.`;
   }
   if ("error" in target) return target.error;
   const { owner, repo, number, author, baseRef } = target;
@@ -161,14 +165,14 @@ export async function processApproval(input: ProcessInput): Promise<string> {
     lines.push(
       `⚠️ Skipped ${result.skippedNoPat
         .map((l) => `@${l}`)
-        .join(", ")} — no PAT registered (visit /setup)`,
+        .join(", ")} — no PAT registered (visit ${setup})`,
     );
   }
   if (notLinked.length) {
     lines.push(
       `⚠️ Not linked: ${notLinked
         .map((id) => `<@${id}>`)
-        .join(", ")} — link your Slack ID at /setup`,
+        .join(", ")} — link your Slack ID at ${setup}`,
     );
   }
   if (failed.length) lines.push(`❌ ${failed.join("; ")}`);
@@ -178,12 +182,46 @@ export async function processApproval(input: ProcessInput): Promise<string> {
   return lines.join("\n");
 }
 
-async function postToSlack(responseUrl: string, text: string): Promise<void> {
-  await fetch(responseUrl, {
+// Post a reply in the channel, threaded under the triggering message.
+async function postSlackMessage(
+  botToken: string,
+  channel: string,
+  threadTs: string,
+  text: string,
+): Promise<void> {
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ response_type: "in_channel", text }),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({ channel, thread_ts: threadTs, text }),
   });
+  const data = (await res.json()) as { ok: boolean; error?: string };
+  if (!data.ok) console.error("chat.postMessage failed:", data.error);
+}
+
+// Absolute base URL of this deployment, derived from the proxy headers Vercel
+// sets — used to build clickable /setup links in replies.
+function baseUrl(req: Request): string {
+  const host =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  return host ? `${proto}://${host}` : "";
+}
+
+interface SlackEventBody {
+  type?: string;
+  challenge?: string;
+  authorizations?: { user_id?: string }[];
+  event?: {
+    type?: string;
+    text?: string;
+    channel?: string;
+    ts?: string;
+    thread_ts?: string;
+    bot_id?: string;
+  };
 }
 
 export async function handler(req: Request): Promise<Response> {
@@ -204,36 +242,62 @@ export async function handler(req: Request): Promise<Response> {
   );
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const form = new URLSearchParams(raw);
-  const text = form.get("text") ?? "";
-  const responseUrl = form.get("response_url");
+  let body: SlackEventBody;
+  try {
+    body = JSON.parse(raw) as SlackEventBody;
+  } catch {
+    return new Response("bad request", { status: 400 });
+  }
 
-  const ref = parsePrRef(text, cfg.defaultOwner);
-  const slackUserIds = parseSlackUserIds(text);
+  // Slack's one-time endpoint verification handshake.
+  if (body.type === "url_verification") {
+    return new Response(body.challenge ?? "", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    });
+  }
 
-  // Finish the GitHub work after acking; post the result to Slack.
-  // We await the return value of waitUntil: in production it returns void
-  // (no-op), but the test mock returns the promise so tests can observe effects.
-  await waitUntil(
-    (async () => {
-      try {
-        const summary = await processApproval({ ref, slackUserIds, cfg });
-        if (responseUrl) await postToSlack(responseUrl, summary);
-      } catch (err) {
-        console.error("slack approval failed:", err);
-        if (responseUrl) {
-          await postToSlack(responseUrl, "❌ Something went wrong processing the approval.");
+  // Slack retries on any non-2xx or slow ack. We always ack fast, but if a retry
+  // does arrive, skip reprocessing so we don't approve / reply twice.
+  if (req.headers.get("x-slack-retry-num")) {
+    return new Response("ok", { status: 200 });
+  }
+
+  const event = body.event;
+  // Only act on app_mention events from humans (ignore the bot's own posts).
+  if (event?.type === "app_mention" && !event.bot_id) {
+    const text = event.text ?? "";
+    const botUserId = body.authorizations?.[0]?.user_id;
+    const ref = parsePrRef(text, cfg.defaultOwner);
+    // Drop the bot's own mention so it isn't treated as a reviewer.
+    const slackUserIds = parseSlackUserIds(text).filter((id) => id !== botUserId);
+    const channel = event.channel ?? "";
+    const threadTs = event.thread_ts ?? event.ts ?? "";
+    const appBaseUrl = baseUrl(req);
+
+    // We await waitUntil's return: void (no-op) in prod, the promise under test.
+    await waitUntil(
+      (async () => {
+        try {
+          const summary = await processApproval({ ref, slackUserIds, cfg, appBaseUrl });
+          if (channel) await postSlackMessage(cfg.slackBotToken, channel, threadTs, summary);
+        } catch (err) {
+          console.error("slack approval failed:", err);
+          if (channel) {
+            await postSlackMessage(
+              cfg.slackBotToken,
+              channel,
+              threadTs,
+              "❌ Something went wrong processing the approval.",
+            );
+          }
         }
-      }
-    })(),
-  );
+      })(),
+    );
+  }
 
-  // Ack within Slack's 3s window. in_channel so Slack echoes the user's
-  // command into the channel publicly and the ack/summary are visible to all.
-  return new Response(
-    JSON.stringify({ response_type: "in_channel", text: "⏳ Working on it…" }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
+  // Ack within Slack's 3s window.
+  return new Response("ok", { status: 200 });
 }
 
 // Vercel reads a default export with a `fetch` method as a Web Handler

@@ -6,6 +6,7 @@ const key32Hex = "a".repeat(64);
 function fullEnv(): Record<string, string> {
   return {
     SLACK_SIGNING_SECRET: "slacksecret",
+    SLACK_BOT_TOKEN: "xoxb-test",
     ENCRYPTION_KEY: key32Hex,
     SETUP_ACCESS_CODE: "code",
   };
@@ -15,6 +16,7 @@ describe("loadConfig", () => {
   it("loads required values and applies defaults", () => {
     const cfg = loadConfig(fullEnv());
     expect(cfg.slackSigningSecret).toBe("slacksecret");
+    expect(cfg.slackBotToken).toBe("xoxb-test");
     expect(cfg.setupAccessCode).toBe("code");
     expect(cfg.encryptionKey.length).toBe(32);
     expect(cfg.protectedBranches).toEqual(["main", "master"]);
@@ -44,6 +46,12 @@ describe("loadConfig", () => {
     const env = fullEnv();
     delete env.SLACK_SIGNING_SECRET;
     expect(() => loadConfig(env)).toThrow(/SLACK_SIGNING_SECRET/);
+  });
+
+  it("throws when SLACK_BOT_TOKEN is missing", () => {
+    const env = fullEnv();
+    delete env.SLACK_BOT_TOKEN;
+    expect(() => loadConfig(env)).toThrow(/SLACK_BOT_TOKEN/);
   });
 
   it("throws on a wrong-length encryption key", () => {

@@ -17,9 +17,9 @@ import { getAuthenticatedLogin } from "../lib/github";
 
 function env() {
   vi.stubEnv("SLACK_SIGNING_SECRET", "s");
+  vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
   vi.stubEnv("ENCRYPTION_KEY", "a".repeat(64));
   vi.stubEnv("SETUP_ACCESS_CODE", "letmein");
-  vi.stubEnv("BOT_PAT", "ghp_bot");
 }
 
 function post(body: unknown): Request {
