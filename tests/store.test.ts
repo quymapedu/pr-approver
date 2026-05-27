@@ -24,7 +24,7 @@ const query = vi.fn(async (text: string, params: unknown[] = []) => {
 });
 
 vi.mock("@neondatabase/serverless", () => ({
-  neon: vi.fn(() => ({ query })),
+  neon: vi.fn(() => query),
 }));
 
 import { putPat, getPat, delPat, listLogins } from "../lib/store";
