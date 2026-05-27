@@ -32,7 +32,7 @@ export function parsePrUrl(
 
 export function parseSlackUserIds(text: string): string[] {
   const out: string[] = [];
-  for (const m of text.matchAll(/<@([A-Z0-9_]+)(?:\|[^>]*)?>/g)) {
+  for (const m of text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g)) {
     if (!out.includes(m[1])) out.push(m[1]);
   }
   return out;

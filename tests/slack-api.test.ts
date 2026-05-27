@@ -14,7 +14,7 @@ vi.mock("../lib/store", () => ({
   listLogins: vi.fn(async () => ["bob", "carol"]),
   getPat: vi.fn(async (login: string) => `ghp_${login}`),
   getLoginForSlack: vi.fn(async (id: string) =>
-    ({ U_BOB: "bob", U_CAROL: "carol" } as Record<string, string>)[id] ?? null,
+    ({ U01BOB: "bob", U01CAROL: "carol" } as Record<string, string>)[id] ?? null,
   ),
 }));
 
@@ -67,7 +67,7 @@ describe("processApproval", () => {
   it("approves resolved + registered reviewers", async () => {
     const summary = await processApproval({
       pr: { owner: "org", repo: "repo", number: 7 },
-      slackUserIds: ["U_BOB", "U_CAROL"],
+      slackUserIds: ["U01BOB", "U01CAROL"],
       cfg,
     });
     expect(approve).toHaveBeenCalledTimes(2);
@@ -78,11 +78,11 @@ describe("processApproval", () => {
   it("reports unlinked Slack users", async () => {
     const summary = await processApproval({
       pr: { owner: "org", repo: "repo", number: 7 },
-      slackUserIds: ["U_BOB", "U_STRANGER"],
+      slackUserIds: ["U01BOB", "U01STRANGER"],
       cfg,
     });
     expect(approve).toHaveBeenCalledTimes(1);
-    expect(summary).toContain("<@U_STRANGER>");
+    expect(summary).toContain("<@U01STRANGER>");
     expect(summary.toLowerCase()).toContain("not linked");
   });
 
@@ -90,7 +90,7 @@ describe("processApproval", () => {
     (getPullRequest as any).mockResolvedValueOnce({ author: "alice", baseRef: "main" });
     const summary = await processApproval({
       pr: { owner: "org", repo: "repo", number: 7 },
-      slackUserIds: ["U_BOB"],
+      slackUserIds: ["U01BOB"],
       cfg,
     });
     expect(approve).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("processApproval", () => {
   });
 
   it("returns a usage message when no PR URL", async () => {
-    const summary = await processApproval({ pr: null, slackUserIds: ["U_BOB"], cfg });
+    const summary = await processApproval({ pr: null, slackUserIds: ["U01BOB"], cfg });
     expect(approve).not.toHaveBeenCalled();
     expect(summary.toLowerCase()).toContain("pr url");
   });
@@ -131,7 +131,7 @@ describe("slack handler", () => {
   });
 
   it("acks 200, approves, and posts the summary to response_url", async () => {
-    const res = await handler(slackRequest(`${PR} <@U_BOB> <@U_CAROL>`));
+    const res = await handler(slackRequest(`${PR} <@U01BOB> <@U01CAROL>`));
     expect(res.status).toBe(200);
     expect(approve).toHaveBeenCalledTimes(2);
     const fetchMock = globalThis.fetch as any;
@@ -145,7 +145,7 @@ describe("slack handler", () => {
 
   it("returns a clean 500 when SLACK_SIGNING_SECRET is missing", async () => {
     vi.stubEnv("SLACK_SIGNING_SECRET", "");
-    const res = await handler(slackRequest(`${PR} <@U_BOB>`));
+    const res = await handler(slackRequest(`${PR} <@U01BOB>`));
     expect(res.status).toBe(500);
   });
 });
