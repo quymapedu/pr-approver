@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
 import {
   verifySlackSignature,
-  parsePrUrl,
+  parsePrRef,
   parseSlackUserIds,
 } from "../lib/slack";
+
+const OWNER = "mapEDU-AI";
 
 const secret = "shh";
 const body = "command=/approve-as&text=hi";
@@ -32,14 +34,52 @@ describe("verifySlackSignature", () => {
   });
 });
 
-describe("parsePrUrl", () => {
-  it("extracts owner/repo/number from a PR URL in the text", () => {
-    expect(parsePrUrl("approve https://github.com/org/repo/pull/123 please")).toEqual(
+describe("parsePrRef", () => {
+  it("parses a full PR URL with its own owner/repo", () => {
+    expect(parsePrRef("approve https://github.com/org/repo/pull/123 please", OWNER)).toEqual(
       { owner: "org", repo: "repo", number: 123 },
     );
   });
-  it("returns null when no PR URL is present", () => {
-    expect(parsePrUrl("nothing here")).toBeNull();
+  it("parses a scheme-less github.com URL", () => {
+    expect(parsePrRef("github.com/org/repo/pull/9", OWNER)).toEqual(
+      { owner: "org", repo: "repo", number: 9 },
+    );
+  });
+  it("parses owner/repo/pull/n", () => {
+    expect(parsePrRef("mapEDU-AI/mapedu-be/pull/1164", OWNER)).toEqual(
+      { owner: "mapEDU-AI", repo: "mapedu-be", number: 1164 },
+    );
+  });
+  it("parses repo/pull/n using the default owner", () => {
+    expect(parsePrRef("mapedu-be/pull/1164", OWNER)).toEqual(
+      { owner: OWNER, repo: "mapedu-be", number: 1164 },
+    );
+  });
+  it("parses repo#n using the default owner", () => {
+    expect(parsePrRef("mapedu-fe#42", OWNER)).toEqual(
+      { owner: OWNER, repo: "mapedu-fe", number: 42 },
+    );
+  });
+  it("parses a bare number as repo:null with the default owner", () => {
+    expect(parsePrRef("1164", OWNER)).toEqual(
+      { owner: OWNER, repo: null, number: 1164 },
+    );
+  });
+  it("parses a #-prefixed bare number", () => {
+    expect(parsePrRef("approve #1164 please", OWNER)).toEqual(
+      { owner: OWNER, repo: null, number: 1164 },
+    );
+  });
+  it("ignores digits inside Slack mention tokens", () => {
+    expect(parsePrRef("<@U01BOB> please review mapedu-be/pull/7", OWNER)).toEqual(
+      { owner: OWNER, repo: "mapedu-be", number: 7 },
+    );
+  });
+  it("does not treat a Slack user id as a bare PR number", () => {
+    expect(parsePrRef("<@U01BOB> hi", OWNER)).toBeNull();
+  });
+  it("returns null when no PR reference is present", () => {
+    expect(parsePrRef("nothing here", OWNER)).toBeNull();
   });
 });
 

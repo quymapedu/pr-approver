@@ -20,6 +20,18 @@ describe("loadConfig", () => {
     expect(cfg.setupAccessCode).toBe("code");
     expect(cfg.encryptionKey.length).toBe(32);
     expect(cfg.protectedBranches).toEqual(["main", "master"]);
+    expect(cfg.defaultOwner).toBe("mapEDU-AI");
+    expect(cfg.repos).toContain("mapedu-be");
+  });
+
+  it("parses DEFAULT_OWNER and REPOS overrides", () => {
+    const cfg = loadConfig({
+      ...fullEnv(),
+      DEFAULT_OWNER: "acme",
+      REPOS: "api, web , ",
+    });
+    expect(cfg.defaultOwner).toBe("acme");
+    expect(cfg.repos).toEqual(["api", "web"]);
   });
 
   it("parses PROTECTED_BRANCHES override", () => {

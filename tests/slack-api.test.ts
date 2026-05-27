@@ -8,6 +8,11 @@ vi.mock("@vercel/functions", () => ({
 vi.mock("../lib/github", () => ({
   clientForToken: vi.fn((pat: string) => ({ __pat: pat })),
   getPullRequest: vi.fn(async () => ({ author: "alice", baseRef: "feature/x" })),
+  tryGetPullRequest: vi.fn(async () => ({
+    author: "alice",
+    baseRef: "feature/x",
+    state: "open",
+  })),
   approve: vi.fn(async () => {}),
 }));
 vi.mock("../lib/store", () => ({
@@ -19,7 +24,7 @@ vi.mock("../lib/store", () => ({
 }));
 
 import { handler, processApproval } from "../api/slack";
-import { approve, getPullRequest } from "../lib/github";
+import { approve, getPullRequest, tryGetPullRequest } from "../lib/github";
 import type { Config } from "../lib/config";
 
 const SECRET = "slacksecret";
@@ -37,6 +42,8 @@ const cfg: Config = {
   encryptionKey: Buffer.alloc(32, 1),
   setupAccessCode: "code",
   protectedBranches: ["main", "master"],
+  defaultOwner: "mapEDU-AI",
+  repos: ["mapedu-be", "mapedu-fe"],
 };
 
 const PR = "https://github.com/org/repo/pull/7";
@@ -66,7 +73,7 @@ describe("processApproval", () => {
 
   it("approves resolved + registered reviewers", async () => {
     const summary = await processApproval({
-      pr: { owner: "org", repo: "repo", number: 7 },
+      ref: { owner: "org", repo: "repo", number: 7 },
       slackUserIds: ["U01BOB", "U01CAROL"],
       cfg,
     });
@@ -77,7 +84,7 @@ describe("processApproval", () => {
 
   it("reports unlinked Slack users", async () => {
     const summary = await processApproval({
-      pr: { owner: "org", repo: "repo", number: 7 },
+      ref: { owner: "org", repo: "repo", number: 7 },
       slackUserIds: ["U01BOB", "U01STRANGER"],
       cfg,
     });
@@ -89,7 +96,7 @@ describe("processApproval", () => {
   it("refuses a protected base branch without approving", async () => {
     (getPullRequest as any).mockResolvedValueOnce({ author: "alice", baseRef: "main" });
     const summary = await processApproval({
-      pr: { owner: "org", repo: "repo", number: 7 },
+      ref: { owner: "org", repo: "repo", number: 7 },
       slackUserIds: ["U01BOB"],
       cfg,
     });
@@ -97,10 +104,57 @@ describe("processApproval", () => {
     expect(summary.toLowerCase()).toContain("main");
   });
 
-  it("returns a usage message when no PR URL", async () => {
-    const summary = await processApproval({ pr: null, slackUserIds: ["U01BOB"], cfg });
+  it("returns a usage message when no PR reference", async () => {
+    const summary = await processApproval({ ref: null, slackUserIds: ["U01BOB"], cfg });
     expect(approve).not.toHaveBeenCalled();
-    expect(summary.toLowerCase()).toContain("pr url");
+    expect(summary.toLowerCase()).toContain("usage");
+  });
+
+  it("resolves a bare number to the one repo with an open PR", async () => {
+    (tryGetPullRequest as any).mockImplementation(async (_c: unknown, _o: string, repo: string) =>
+      repo === "mapedu-be"
+        ? { author: "alice", baseRef: "feature/x", state: "open" }
+        : null,
+    );
+    const summary = await processApproval({
+      ref: { owner: "mapEDU-AI", repo: null, number: 1164 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+    });
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve).toHaveBeenCalledWith(
+      expect.anything(),
+      "mapEDU-AI",
+      "mapedu-be",
+      1164,
+    );
+    expect(summary).toContain("@bob");
+  });
+
+  it("asks to disambiguate a bare number open in multiple repos", async () => {
+    (tryGetPullRequest as any).mockImplementation(async () => ({
+      author: "alice",
+      baseRef: "feature/x",
+      state: "open",
+    }));
+    const summary = await processApproval({
+      ref: { owner: "mapEDU-AI", repo: null, number: 1164 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+    });
+    expect(approve).not.toHaveBeenCalled();
+    expect(summary.toLowerCase()).toContain("multiple repos");
+  });
+
+  it("reports not found when a bare number matches no open PR", async () => {
+    (tryGetPullRequest as any).mockImplementation(async () => null);
+    const summary = await processApproval({
+      ref: { owner: "mapEDU-AI", repo: null, number: 999 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+    });
+    expect(approve).not.toHaveBeenCalled();
+    expect(summary.toLowerCase()).toContain("couldn't find");
   });
 });
 

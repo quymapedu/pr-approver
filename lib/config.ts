@@ -4,7 +4,23 @@ export interface Config {
   encryptionKey: Buffer;
   setupAccessCode: string;
   protectedBranches: string[];
+  // Used to expand short PR references in /approve-as.
+  defaultOwner: string;
+  // Repos probed when the user gives a bare PR number (no repo).
+  repos: string[];
 }
+
+// Org repos probed for a bare PR number, in priority order. Override with REPOS.
+const DEFAULT_REPOS = [
+  "mapedu-be",
+  "mapedu-fe",
+  "mapedu-admin",
+  "mapedu-ds",
+  "mapedu-content-automapper",
+  "mapedu-filesearch",
+  "terraform",
+  "docs",
+];
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const v = env[name];
@@ -27,6 +43,7 @@ export function loadConfig(
   env: Record<string, string | undefined> = process.env,
 ): Config {
   const protectedRaw = env.PROTECTED_BRANCHES ?? "main,master";
+  const reposRaw = env.REPOS;
 
   return {
     slackSigningSecret: required(env, "SLACK_SIGNING_SECRET"),
@@ -37,5 +54,12 @@ export function loadConfig(
       .split(",")
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+    defaultOwner: env.DEFAULT_OWNER ?? "mapEDU-AI",
+    repos: reposRaw
+      ? reposRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : DEFAULT_REPOS,
   };
 }

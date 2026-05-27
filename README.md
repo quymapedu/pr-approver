@@ -9,6 +9,19 @@ In Slack:
 /approve-as https://github.com/org/repo/pull/123 @bob @carol
 ```
 
+The PR can be given several ways (shortest wins for typing speed):
+
+| Form | Example |
+|---|---|
+| Full URL | `https://github.com/mapEDU-AI/mapedu-be/pull/1164` |
+| owner/repo | `mapEDU-AI/mapedu-be/pull/1164` |
+| repo only | `mapedu-be/pull/1164` &nbsp;or&nbsp; `mapedu-be#1164` |
+| bare number | `1164` &nbsp;or&nbsp; `#1164` |
+
+Short forms fill in the owner from `DEFAULT_OWNER`. A bare number is matched
+against the repos in `REPOS`: if exactly one has an **open** PR with that number
+it's used; if several do, the bot asks you to name the repo.
+
 The bot resolves each tagged Slack user to their linked GitHub login and submits
 an approving review **as each of them**, then replies in-channel with a summary.
 
@@ -41,8 +54,11 @@ an approving review **as each of them**, then replies in-channel with a summary.
 
 ### 2. Create a BOT_PAT
 
-A GitHub PAT (your own or a machine account) with **Pull requests: Read** on the
-target repos — it only reads PRs (base branch + author).
+A **classic** GitHub PAT (your own or a machine account) with the **`repo`**
+scope. It only reads PRs (base branch + author) and probes repos for bare PR
+numbers, but classic tokens need full `repo` to see private repos. The account
+must have access to the target repos. (Fine-grained tokens require org opt-in
+that isn't enabled here, so they 404 — use a classic token.)
 
 ### 3. Create the Slack app
 
@@ -63,12 +79,16 @@ target repos — it only reads PRs (base branch + author).
 | `ENCRYPTION_KEY` | 32-byte key: `openssl rand -hex 32` |
 | `SETUP_ACCESS_CODE` | a shared code your team uses on `/setup` |
 | `PROTECTED_BRANCHES` | *(optional)* comma list, default `main,master` |
+| `DEFAULT_OWNER` | *(optional)* org/user for short PR refs, default `mapEDU-AI` |
+| `REPOS` | *(optional)* comma list probed for bare PR numbers, defaults to the mapEDU repos |
 
 (`DATABASE_URL` is injected by Neon.)
 
 ### 5. Register + link (each teammate)
 
-1. Create a fine-grained PAT with **Pull requests: Read and write** on the repos.
+1. Create a **classic** PAT with the **`repo`** scope
+   ([create one here](https://github.com/settings/tokens/new?scopes=repo&description=PR%20Approver)).
+   Fine-grained tokens are not supported.
 2. Find your Slack member ID: Slack profile → ⋮ (More) → **Copy member ID**.
 3. Visit `https://<app>.vercel.app/setup`, enter the access code, your PAT, and
    your Slack member ID, click **Register**.
@@ -77,8 +97,9 @@ To revoke: same page, **Remove** (or delete the PAT on GitHub).
 
 ### 6. Test
 
-In Slack: `/approve-as https://github.com/org/repo/pull/<n> @teammate` into a
-non-protected branch. The bot replies with a summary and the approval appears.
+In Slack: `/approve-as <pr> @teammate` (any PR form above — e.g. a bare
+`1164`) targeting a non-protected branch. The bot replies with a summary and
+the approval appears on the PR.
 
 ## Development
 

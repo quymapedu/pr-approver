@@ -22,12 +22,41 @@ export function verifySlackSignature(
   return timingSafeEqual(a, b);
 }
 
-export function parsePrUrl(
-  text: string,
-): { owner: string; repo: string; number: number } | null {
-  const m = text.match(/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2], number: Number(m[3]) };
+// A PR reference parsed from command text. `repo === null` means the user gave
+// only a number, so the repo must be resolved by probing the configured repos.
+export interface PrRef {
+  owner: string;
+  repo: string | null;
+  number: number;
+}
+
+// Accepts, in priority order:
+//   https://github.com/<owner>/<repo>/pull/<n>   (full or scheme-less URL)
+//   <owner>/<repo>/pull/<n>  or  <repo>/pull/<n>
+//   <owner>/<repo>#<n>       or  <repo>#<n>
+//   <n>  or  #<n>            (bare number -> repo: null, owner: defaultOwner)
+// Slack mention/link tokens (<@U…>, <#C…>, <http…>) are stripped first so their
+// digits never get mistaken for a PR number.
+export function parsePrRef(text: string, defaultOwner: string): PrRef | null {
+  const cleaned = text.replace(/<[^>]*>/g, " ");
+
+  const url = cleaned.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/i);
+  if (url) return { owner: url[1], repo: url[2], number: Number(url[3]) };
+
+  const path = cleaned.match(/(?:([\w.-]+)\/)?([\w.-]+)\/pull\/(\d+)/i);
+  if (path) {
+    return { owner: path[1] ?? defaultOwner, repo: path[2], number: Number(path[3]) };
+  }
+
+  const hash = cleaned.match(/(?:([\w.-]+)\/)?([\w.-]+)#(\d+)/);
+  if (hash) {
+    return { owner: hash[1] ?? defaultOwner, repo: hash[2], number: Number(hash[3]) };
+  }
+
+  const bare = cleaned.match(/(?:^|\s)#?(\d+)(?:\s|$)/);
+  if (bare) return { owner: defaultOwner, repo: null, number: Number(bare[1]) };
+
+  return null;
 }
 
 export function parseSlackUserIds(text: string): string[] {

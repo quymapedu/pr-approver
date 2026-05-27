@@ -1,20 +1,83 @@
 import { waitUntil } from "@vercel/functions";
 import { loadConfig, type Config } from "../lib/config.js";
-import { verifySlackSignature, parsePrUrl, parseSlackUserIds } from "../lib/slack.js";
+import {
+  verifySlackSignature,
+  parsePrRef,
+  parseSlackUserIds,
+  type PrRef,
+} from "../lib/slack.js";
 import { decide } from "../lib/decide.js";
 import { listLogins, getPat, getLoginForSlack } from "../lib/store.js";
-import { clientForToken, getPullRequest, approve } from "../lib/github.js";
+import {
+  clientForToken,
+  getPullRequest,
+  tryGetPullRequest,
+  approve,
+  type GitHubClient,
+} from "../lib/github.js";
 
 interface ProcessInput {
-  pr: { owner: string; repo: string; number: number } | null;
+  ref: PrRef | null;
   slackUserIds: string[];
   cfg: Config;
 }
 
+// A PR reference is either fully specified (owner/repo/number) or just a number
+// that must be matched against the configured repos. Returns the resolved
+// target plus its metadata, or a user-facing message explaining why it can't.
+async function resolveTarget(
+  ref: PrRef,
+  readClient: GitHubClient,
+  cfg: Config,
+): Promise<
+  | { owner: string; repo: string; number: number; author: string; baseRef: string }
+  | { error: string }
+> {
+  if (ref.repo) {
+    const { author, baseRef } = await getPullRequest(
+      readClient,
+      ref.owner,
+      ref.repo,
+      ref.number,
+    );
+    return { owner: ref.owner, repo: ref.repo, number: ref.number, author, baseRef };
+  }
+
+  // Bare number: probe each configured repo for an open PR with this number.
+  const matches: { repo: string; author: string; baseRef: string }[] = [];
+  for (const repo of cfg.repos) {
+    const found = await tryGetPullRequest(readClient, ref.owner, repo, ref.number);
+    if (found && found.state === "open") {
+      matches.push({ repo, author: found.author, baseRef: found.baseRef });
+    }
+  }
+
+  if (matches.length === 0) {
+    return {
+      error: `⚠️ Couldn't find an open PR #${ref.number} in any configured repo. Try \`<repo>/pull/${ref.number}\`.`,
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      error: `⚠️ PR #${ref.number} is open in multiple repos: ${matches
+        .map((m) => m.repo)
+        .join(", ")}. Specify one, e.g. \`${matches[0].repo}/pull/${ref.number}\`.`,
+    };
+  }
+  const m = matches[0];
+  return {
+    owner: ref.owner,
+    repo: m.repo,
+    number: ref.number,
+    author: m.author,
+    baseRef: m.baseRef,
+  };
+}
+
 export async function processApproval(input: ProcessInput): Promise<string> {
-  const { pr, slackUserIds, cfg } = input;
-  if (!pr) {
-    return "⚠️ Couldn't find a GitHub PR URL in your command. Usage: `/approve-as <pr-url> @user`";
+  const { ref, slackUserIds, cfg } = input;
+  if (!ref) {
+    return "⚠️ Couldn't find a PR in your command. Usage: `/approve-as <pr-url | repo/pull/N | N> @user`";
   }
 
   const resolved: string[] = [];
@@ -26,12 +89,9 @@ export async function processApproval(input: ProcessInput): Promise<string> {
   }
 
   const botClient = clientForToken(cfg.botPat);
-  const { author, baseRef } = await getPullRequest(
-    botClient,
-    pr.owner,
-    pr.repo,
-    pr.number,
-  );
+  const target = await resolveTarget(ref, botClient, cfg);
+  if ("error" in target) return target.error;
+  const { owner, repo, number, author, baseRef } = target;
 
   const registeredLogins = await listLogins();
   const result = decide({
@@ -55,7 +115,7 @@ export async function processApproval(input: ProcessInput): Promise<string> {
         failed.push(`@${login} — token missing`);
         continue;
       }
-      await approve(clientForToken(pat), pr.owner, pr.repo, pr.number);
+      await approve(clientForToken(pat), owner, repo, number);
       approved.push(`@${login}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown error";
@@ -116,7 +176,7 @@ export async function handler(req: Request): Promise<Response> {
   const text = form.get("text") ?? "";
   const responseUrl = form.get("response_url");
 
-  const pr = parsePrUrl(text);
+  const ref = parsePrRef(text, cfg.defaultOwner);
   const slackUserIds = parseSlackUserIds(text);
 
   // Finish the GitHub work after acking; post the result to Slack.
@@ -125,7 +185,7 @@ export async function handler(req: Request): Promise<Response> {
   await waitUntil(
     (async () => {
       try {
-        const summary = await processApproval({ pr, slackUserIds, cfg });
+        const summary = await processApproval({ ref, slackUserIds, cfg });
         if (responseUrl) await postToSlack(responseUrl, summary);
       } catch (err) {
         console.error("slack approval failed:", err);
