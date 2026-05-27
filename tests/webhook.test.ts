@@ -114,4 +114,12 @@ describe("webhook handler", () => {
     const summary = (postComment as any).mock.calls[0][4] as string;
     expect(summary).toMatch(/@bob|@carol/);
   });
+
+  it("returns a clean 500 (no stack) when fetching the PR fails", async () => {
+    (getPullRequest as any).mockRejectedValueOnce(new Error("boom secret stack"));
+    const res = await handler(signedRequest(event("@pr-approver-bot @bob")));
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain("boom secret stack");
+  });
 });
