@@ -77,7 +77,7 @@ async function resolveTarget(
 export async function processApproval(input: ProcessInput): Promise<string> {
   const { ref, slackUserIds, cfg } = input;
   if (!ref) {
-    return "⚠️ Couldn't find a PR in your command. Usage: `/approve-as <pr-url | repo/pull/N | N> @user`";
+    return "⚠️ Couldn't find a PR in your command. Usage: `/approve <pr-url | repo/pull/N | N> @user`";
   }
 
   const resolved: string[] = [];
@@ -123,8 +123,11 @@ export async function processApproval(input: ProcessInput): Promise<string> {
     }
   }
 
+  const prLink = `<https://github.com/${owner}/${repo}/pull/${number}|#${number}>`;
   const lines: string[] = [];
-  if (approved.length) lines.push(`✅ Approved as ${approved.join(", ")}`);
+  if (approved.length) {
+    lines.push(`✅ Approved ${prLink} as ${approved.join(", ")}`);
+  }
   if (result.skippedNoPat.length) {
     lines.push(
       `⚠️ Skipped ${result.skippedNoPat

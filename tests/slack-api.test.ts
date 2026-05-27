@@ -80,6 +80,8 @@ describe("processApproval", () => {
     expect(approve).toHaveBeenCalledTimes(2);
     expect(summary).toContain("@bob");
     expect(summary).toContain("@carol");
+    // PR number rendered as a Slack link to the PR.
+    expect(summary).toContain("<https://github.com/org/repo/pull/7|#7>");
   });
 
   it("reports unlinked Slack users", async () => {

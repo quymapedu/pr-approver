@@ -6,7 +6,7 @@ reviewers, using each reviewer's own Personal Access Token.
 In Slack:
 
 ```
-/approve-as https://github.com/org/repo/pull/123 @bob @carol
+/approve https://github.com/org/repo/pull/123 @bob @carol
 ```
 
 The PR can be given several ways (shortest wins for typing speed):
@@ -64,7 +64,7 @@ that isn't enabled here, so they 404 — use a classic token.)
 
 - api.slack.com/apps → Create New App → From scratch → pick your workspace.
 - **Slash Commands → Create New Command:**
-  - Command: `/approve-as`
+  - Command: `/approve`
   - Request URL: `https://<app>.vercel.app/api/slack`
   - Enable **"Escape channels, users, and links sent to your app"**.
 - **Basic Information → App Credentials → Signing Secret** → this is `SLACK_SIGNING_SECRET`.
@@ -97,7 +97,7 @@ To revoke: same page, **Remove** (or delete the PAT on GitHub).
 
 ### 6. Test
 
-In Slack: `/approve-as <pr> @teammate` (any PR form above — e.g. a bare
+In Slack: `/approve <pr> @teammate` (any PR form above — e.g. a bare
 `1164`) targeting a non-protected branch. The bot replies with a summary and
 the approval appears on the PR.
 
