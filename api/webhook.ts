@@ -1,4 +1,4 @@
-import { loadConfig } from "../lib/config";
+import { loadConfig, type Config } from "../lib/config";
 import { verifySignature } from "../lib/verify";
 import { extractMentions, containsTrigger } from "../lib/parse";
 import { decide } from "../lib/decide";
@@ -21,7 +21,14 @@ interface IssueCommentEvent {
 }
 
 export default async function handler(req: Request): Promise<Response> {
-  const cfg = loadConfig();
+  let cfg: Config;
+  try {
+    cfg = loadConfig();
+  } catch (err) {
+    console.error("webhook config error:", err);
+    return new Response("configuration error", { status: 500 });
+  }
+
   const raw = await req.text();
 
   if (!verifySignature(raw, req.headers.get("x-hub-signature-256"), cfg.webhookSecret)) {

@@ -59,6 +59,15 @@ describe("webhook handler", () => {
     env();
   });
 
+  it("returns a clean 500 when a required env var is missing", async () => {
+    vi.stubEnv("WEBHOOK_SECRET", ""); // required var now missing
+    const res = await handler(
+      new Request("https://x/api/webhook", { method: "POST", body: "{}" }),
+    );
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("configuration error");
+  });
+
   it("rejects a bad signature with 401", async () => {
     const raw = JSON.stringify(event("@pr-approver-bot @bob"));
     const res = await handler(

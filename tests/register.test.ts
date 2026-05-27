@@ -42,6 +42,14 @@ describe("register handler", () => {
     expect(putPat).not.toHaveBeenCalled();
   });
 
+  it("returns a clean 500 when a required env var is missing", async () => {
+    vi.stubEnv("ENCRYPTION_KEY", ""); // required var now missing
+    const res = await handler(post({ action: "register", accessCode: "letmein", pat: "ghp_x" }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "Configuration error" });
+    expect(putPat).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid PAT with 401", async () => {
     (getAuthenticatedLogin as any).mockRejectedValueOnce(new Error("bad"));
     const res = await handler(post({ action: "register", accessCode: "letmein", pat: "bad" }));

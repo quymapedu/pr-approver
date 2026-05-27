@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { loadConfig } from "../lib/config";
+import { loadConfig, type Config } from "../lib/config";
 import { putPat, delPat } from "../lib/store";
 import { clientForToken, getAuthenticatedLogin } from "../lib/github";
 
@@ -21,7 +21,14 @@ function codeMatches(provided: string | undefined, expected: string): boolean {
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
-  const cfg = loadConfig();
+  let cfg: Config;
+  try {
+    cfg = loadConfig();
+  } catch (err) {
+    console.error("register config error:", err);
+    return json(500, { error: "Configuration error" });
+  }
+
   let payload: { action?: string; accessCode?: string; pat?: string };
   try {
     payload = (await req.json()) as typeof payload;
