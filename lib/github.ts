@@ -14,14 +14,6 @@ export interface GitHubClient {
         event: "APPROVE";
       }): Promise<unknown>;
     };
-    issues: {
-      createComment(args: {
-        owner: string;
-        repo: string;
-        issue_number: number;
-        body: string;
-      }): Promise<unknown>;
-    };
     users: {
       getAuthenticated(): Promise<{ data: { login: string } }>;
     };
@@ -54,16 +46,6 @@ export async function approve(
     pull_number,
     event: "APPROVE",
   });
-}
-
-export async function postComment(
-  client: GitHubClient,
-  owner: string,
-  repo: string,
-  issue_number: number,
-  body: string,
-): Promise<void> {
-  await client.rest.issues.createComment({ owner, repo, issue_number, body });
 }
 
 export async function getAuthenticatedLogin(

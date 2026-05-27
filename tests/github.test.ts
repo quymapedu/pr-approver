@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from "vitest";
 import {
   getPullRequest,
   approve,
-  postComment,
   getAuthenticatedLogin,
 } from "../lib/github";
 
@@ -15,7 +14,6 @@ function fakeClient() {
         })),
         createReview: vi.fn(async () => ({ data: {} })),
       },
-      issues: { createComment: vi.fn(async () => ({ data: {} })) },
       users: {
         getAuthenticated: vi.fn(async () => ({ data: { login: "Bob" } })),
       },
@@ -43,17 +41,6 @@ describe("github helpers", () => {
       repo: "r",
       pull_number: 5,
       event: "APPROVE",
-    });
-  });
-
-  it("postComment posts to the issue", async () => {
-    const c = fakeClient();
-    await postComment(c as any, "o", "r", 5, "hi");
-    expect(c.rest.issues.createComment).toHaveBeenCalledWith({
-      owner: "o",
-      repo: "r",
-      issue_number: 5,
-      body: "hi",
     });
   });
 
