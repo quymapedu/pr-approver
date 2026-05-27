@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { loadConfig } from "../lib/config";
 import { putPat, delPat } from "../lib/store";
 import { clientForToken, getAuthenticatedLogin } from "../lib/github";
@@ -7,6 +8,14 @@ function json(status: number, body: unknown): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function codeMatches(provided: string | undefined, expected: string): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -21,7 +30,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const { action = "register", accessCode, pat } = payload;
-  if (accessCode !== cfg.setupAccessCode) {
+  if (!codeMatches(accessCode, cfg.setupAccessCode)) {
     return json(403, { error: "Invalid access code" });
   }
   if (!pat) return json(400, { error: "Missing pat" });
@@ -33,11 +42,15 @@ export default async function handler(req: Request): Promise<Response> {
     return json(401, { error: "Token rejected by GitHub" });
   }
 
-  if (action === "remove") {
-    await delPat(login);
-    return json(200, { login, removed: true });
+  try {
+    if (action === "remove") {
+      await delPat(login);
+      return json(200, { login, removed: true });
+    }
+    await putPat(login, pat, cfg.encryptionKey);
+    return json(200, { login, registered: true });
+  } catch (err) {
+    console.error("register store failure:", err);
+    return json(500, { error: "Storage error" });
   }
-
-  await putPat(login, pat, cfg.encryptionKey);
-  return json(200, { login, registered: true });
 }
