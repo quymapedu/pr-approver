@@ -4,9 +4,9 @@
 
 **Goal:** A GitHub App (on Vercel) that, when tagged in a PR comment alongside one or more reviewers, submits an approving review as each tagged reviewer using their own registered PAT — never approving PRs into protected branches.
 
-**Architecture:** A single Vercel project with two Fetch-API serverless functions: `/api/webhook` (reacts to `issue_comment` events) and `/api/register` (backs the `/setup` self-service page). PATs are stored AES-256-GCM-encrypted in Vercel KV, keyed by the GitHub login that `GET /user` reports for the token. Pure logic (`parse`, `decide`, `crypto`, `verify`, `config`) lives in `lib/` and is fully unit-tested; thin GitHub/KV wrappers take injectable clients so they're testable without network.
+**Architecture:** A single Vercel project with two Fetch-API serverless functions: `/api/webhook` (reacts to `issue_comment` events) and `/api/register` (backs the `/setup` self-service page). PATs are stored AES-256-GCM-encrypted in Neon (serverless Postgres), in a single `pats` table keyed by the GitHub login that `GET /user` reports for the token. Pure logic (`parse`, `decide`, `crypto`, `verify`, `config`) lives in `lib/` and is fully unit-tested; thin GitHub/DB wrappers take injectable clients so they're testable without network.
 
-**Tech Stack:** TypeScript, Vercel Functions (Node runtime, Fetch handlers), `octokit` (App + Octokit), `@vercel/kv`, Node `crypto`, Vitest.
+**Tech Stack:** TypeScript, Vercel Functions (Node runtime, Fetch handlers), `octokit` (App + Octokit), `@neondatabase/serverless` (HTTP driver), Node `crypto`, Vitest.
 
 ---
 
@@ -20,9 +20,9 @@
 | `lib/verify.ts` | HMAC-SHA256 webhook signature verification |
 | `lib/parse.ts` | Extract `@mentions` / detect trigger in a comment body |
 | `lib/decide.ts` | Pure decision: who to approve as / skip / blocked |
-| `lib/store.ts` | KV-backed `login → encrypted PAT` (put/get/del/list) |
+| `lib/store.ts` | Postgres-backed `login → encrypted PAT` (put/get/del/list) |
 | `lib/github.ts` | Octokit helpers: app/installation/pat clients, getPR, approve, comment, whoami |
-| `api/register.ts` | `/setup` backend: verify access code + PAT → upsert/remove in KV |
+| `api/register.ts` | `/setup` backend: verify access code + PAT → upsert/remove in DB |
 | `api/webhook.ts` | Webhook entry: verify, parse, orchestrate approvals |
 | `public/setup.html` | Static paste-PAT form |
 | `README.md` | Setup steps |
@@ -55,7 +55,7 @@ Login strings are normalized to **lowercase** everywhere (GitHub logins are case
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vercel/kv": "^3.0.0",
+    "@neondatabase/serverless": "^0.10.0",
     "octokit": "^4.1.0"
   },
   "devDependencies": {
@@ -693,35 +693,48 @@ git commit -m "feat: typed env config loader with validation"
 
 ---
 
-### Task 7: `lib/store.ts` — KV-backed PAT store
+### Task 7: `lib/store.ts` — Postgres-backed PAT store
 
 **Files:**
 - Create: `lib/store.ts`
 - Test: `tests/store.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+The store talks to Neon via `db().query(text, params)`. Tests mock
+`@neondatabase/serverless` with an in-memory `query()` that interprets the SQL,
+so no network/database is needed. The table is
+`pats(login text primary key, ciphertext text not null)` (created once in Neon —
+see Task 12).
 
-`@vercel/kv` is mocked with an in-memory map so no network/KV is needed.
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 
-const mem = new Map<string, string>();
-vi.mock("@vercel/kv", () => ({
-  kv: {
-    set: vi.fn(async (k: string, v: string) => {
-      mem.set(k, v);
-    }),
-    get: vi.fn(async (k: string) => mem.get(k) ?? null),
-    del: vi.fn(async (k: string) => {
-      mem.delete(k);
-    }),
-    keys: vi.fn(async (pattern: string) => {
-      const prefix = pattern.replace(/\*$/, "");
-      return [...mem.keys()].filter((k) => k.startsWith(prefix));
-    }),
-  },
+const mem = new Map<string, string>(); // login -> ciphertext
+
+// Minimal in-memory stand-in for Neon's sql.query(text, params) -> rows[].
+const query = vi.fn(async (text: string, params: unknown[] = []) => {
+  if (text.includes("INSERT INTO pats")) {
+    mem.set(params[0] as string, params[1] as string);
+    return [];
+  }
+  if (text.includes("SELECT ciphertext FROM pats")) {
+    const v = mem.get(params[0] as string);
+    return v ? [{ ciphertext: v }] : [];
+  }
+  if (text.includes("DELETE FROM pats")) {
+    mem.delete(params[0] as string);
+    return [];
+  }
+  if (text.includes("SELECT login FROM pats")) {
+    return [...mem.keys()].map((login) => ({ login }));
+  }
+  throw new Error(`unexpected query: ${text}`);
+});
+
+vi.mock("@neondatabase/serverless", () => ({
+  neon: vi.fn(() => ({ query })),
 }));
 
 import { putPat, getPat, delPat, listLogins } from "../lib/store";
@@ -734,14 +747,21 @@ describe("store", () => {
   it("stores and retrieves a PAT (encrypted at rest)", async () => {
     await putPat("Bob", "ghp_token", key);
     // stored value is ciphertext, not the raw token
-    expect(mem.get("pat:bob")).toBeDefined();
-    expect(mem.get("pat:bob")).not.toContain("ghp_token");
+    expect(mem.get("bob")).toBeDefined();
+    expect(mem.get("bob")).not.toContain("ghp_token");
     expect(await getPat("bob", key)).toBe("ghp_token");
   });
 
   it("normalizes login to lowercase", async () => {
     await putPat("Carol", "ghp_c", key);
     expect(await getPat("CAROL", key)).toBe("ghp_c");
+  });
+
+  it("upserts on duplicate login", async () => {
+    await putPat("bob", "ghp_old", key);
+    await putPat("bob", "ghp_new", key);
+    expect(await getPat("bob", key)).toBe("ghp_new");
+    expect(mem.size).toBe(1);
   });
 
   it("returns null for an unknown login", async () => {
@@ -754,7 +774,7 @@ describe("store", () => {
     expect(await getPat("dan", key)).toBeNull();
   });
 
-  it("lists registered logins without prefix", async () => {
+  it("lists registered logins", async () => {
     await putPat("bob", "x", key);
     await putPat("carol", "y", key);
     expect((await listLogins()).sort()).toEqual(["bob", "carol"]);
@@ -770,49 +790,62 @@ Expected: FAIL — cannot find `putPat` etc.
 - [ ] **Step 3: Write the implementation**
 
 ```ts
-import { kv } from "@vercel/kv";
+import { neon } from "@neondatabase/serverless";
 import { encrypt, decrypt } from "./crypto";
 
-const PREFIX = "pat:";
 const norm = (login: string) => login.toLowerCase();
+
+// Lazily create one HTTP client per cold start.
+let _sql: ReturnType<typeof neon> | null = null;
+function db() {
+  return (_sql ??= neon(process.env.DATABASE_URL!));
+}
 
 export async function putPat(
   login: string,
   pat: string,
   key: Buffer,
 ): Promise<void> {
-  await kv.set(PREFIX + norm(login), encrypt(pat, key));
+  await db().query(
+    `INSERT INTO pats (login, ciphertext) VALUES ($1, $2)
+     ON CONFLICT (login) DO UPDATE SET ciphertext = EXCLUDED.ciphertext`,
+    [norm(login), encrypt(pat, key)],
+  );
 }
 
 export async function getPat(
   login: string,
   key: Buffer,
 ): Promise<string | null> {
-  const v = await kv.get<string>(PREFIX + norm(login));
-  if (!v) return null;
-  return decrypt(v, key);
+  const rows = (await db().query(
+    `SELECT ciphertext FROM pats WHERE login = $1`,
+    [norm(login)],
+  )) as { ciphertext: string }[];
+  return rows[0] ? decrypt(rows[0].ciphertext, key) : null;
 }
 
 export async function delPat(login: string): Promise<void> {
-  await kv.del(PREFIX + norm(login));
+  await db().query(`DELETE FROM pats WHERE login = $1`, [norm(login)]);
 }
 
 export async function listLogins(): Promise<string[]> {
-  const keys = await kv.keys(PREFIX + "*");
-  return keys.map((k) => k.slice(PREFIX.length));
+  const rows = (await db().query(`SELECT login FROM pats`)) as {
+    login: string;
+  }[];
+  return rows.map((r) => r.login);
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/store.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add lib/store.ts tests/store.test.ts
-git commit -m "feat: KV-backed encrypted PAT store"
+git commit -m "feat: Neon Postgres-backed encrypted PAT store"
 ```
 
 ---
@@ -1148,7 +1181,7 @@ Expected: PASS (5 tests).
 
 ```bash
 git add api/register.ts tests/register.test.ts
-git commit -m "feat: /setup registration endpoint (verify PAT -> KV)"
+git commit -m "feat: /setup registration endpoint (verify PAT -> DB)"
 ```
 
 ---
@@ -1545,11 +1578,19 @@ GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
 
 Install it on the repositories (or the whole org) you want it to operate on.
 
-### 3. Create the Vercel project
+### 3. Create the Vercel project + Neon database
 
 - Import this repo into Vercel.
-- Add a **KV store** (Storage → Create → KV) and connect it to the project.
-  This injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+- Add a **Neon** database (Storage → Create → Neon) and connect it to the
+  project. This injects `DATABASE_URL`.
+- In Neon's SQL editor, create the table once:
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS pats (
+    login      text PRIMARY KEY,
+    ciphertext text NOT NULL
+  );
+  ```
 
 ### 4. Configure environment variables
 
@@ -1562,6 +1603,8 @@ Install it on the repositories (or the whole org) you want it to operate on.
 | `SETUP_ACCESS_CODE` | a shared code your team uses on `/setup` |
 | `PROTECTED_BRANCHES` | *(optional)* comma list, default `main,master` |
 | `TRIGGER_MENTION` | *(optional)* bot login, default `pr-approver-bot` |
+
+(`DATABASE_URL` is injected automatically by the Neon integration.)
 
 ### 5. Deploy
 
