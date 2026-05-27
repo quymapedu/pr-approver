@@ -27,6 +27,8 @@
     <input id="accessCode" type="password" autocomplete="off" />
     <label for="pat">Personal Access Token</label>
     <input id="pat" type="password" autocomplete="off" placeholder="github_pat_… or ghp_…" />
+    <label for="slackUserId">Slack member ID <span class="hint">(optional, for Slack approvals)</span></label>
+    <input id="slackUserId" type="text" autocomplete="off" placeholder="e.g. U01ABCDEFG" />
     <div class="row">
       <button id="register">Register</button>
       <button id="remove">Remove</button>
@@ -42,11 +44,12 @@
       async function send(action) {
         const accessCode = document.getElementById("accessCode").value;
         const pat = document.getElementById("pat").value;
+        const slackUserId = document.getElementById("slackUserId").value.trim();
         try {
           const res = await fetch("/api/register", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action, accessCode, pat }),
+            body: JSON.stringify({ action, accessCode, pat, slackUserId: slackUserId || undefined }),
           });
           const data = await res.json();
           if (!res.ok) return show(false, data.error || "Request failed");

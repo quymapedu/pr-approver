@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { loadConfig, type Config } from "../lib/config";
-import { putPat, delPat } from "../lib/store";
+import { putPat, delPat, putSlackLink, delSlackLink } from "../lib/store";
 import { clientForToken, getAuthenticatedLogin } from "../lib/github";
 
 function json(status: number, body: unknown): Response {
@@ -29,14 +29,19 @@ export default async function handler(req: Request): Promise<Response> {
     return json(500, { error: "Configuration error" });
   }
 
-  let payload: { action?: string; accessCode?: string; pat?: string };
+  let payload: {
+    action?: string;
+    accessCode?: string;
+    pat?: string;
+    slackUserId?: string;
+  };
   try {
     payload = (await req.json()) as typeof payload;
   } catch {
     return json(400, { error: "Invalid JSON" });
   }
 
-  const { action = "register", accessCode, pat } = payload;
+  const { action = "register", accessCode, pat, slackUserId } = payload;
   if (!codeMatches(accessCode, cfg.setupAccessCode)) {
     return json(403, { error: "Invalid access code" });
   }
@@ -52,9 +57,11 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     if (action === "remove") {
       await delPat(login);
+      if (slackUserId) await delSlackLink(slackUserId);
       return json(200, { login, removed: true });
     }
     await putPat(login, pat, cfg.encryptionKey);
+    if (slackUserId) await putSlackLink(slackUserId, login);
     return json(200, { login, registered: true });
   } catch (err) {
     console.error("register store failure:", err);

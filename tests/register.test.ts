@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("../lib/store", () => ({
   putPat: vi.fn(async () => {}),
   delPat: vi.fn(async () => {}),
+  putSlackLink: vi.fn(async () => {}),
+  delSlackLink: vi.fn(async () => {}),
 }));
 vi.mock("../lib/github", () => ({
   clientForToken: vi.fn(() => ({})),
@@ -10,7 +12,7 @@ vi.mock("../lib/github", () => ({
 }));
 
 import handler from "../api/register";
-import { putPat, delPat } from "../lib/store";
+import { putPat, delPat, putSlackLink, delSlackLink } from "../lib/store";
 import { getAuthenticatedLogin } from "../lib/github";
 
 function env() {
@@ -85,5 +87,26 @@ describe("register handler", () => {
   it("rejects an access code of different length with 403", async () => {
     const res = await handler(post({ action: "register", accessCode: "letmein-but-longer", pat: "ghp_x" }));
     expect(res.status).toBe(403);
+  });
+
+  it("stores a Slack link when slackUserId is provided on register", async () => {
+    const res = await handler(
+      post({ action: "register", accessCode: "letmein", pat: "ghp_x", slackUserId: "U9" }),
+    );
+    expect(res.status).toBe(200);
+    expect(putSlackLink).toHaveBeenCalledWith("U9", "Bob");
+  });
+
+  it("does not store a Slack link when slackUserId is omitted", async () => {
+    await handler(post({ action: "register", accessCode: "letmein", pat: "ghp_x" }));
+    expect(putSlackLink).not.toHaveBeenCalled();
+  });
+
+  it("removes the Slack link on remove when slackUserId is provided", async () => {
+    const res = await handler(
+      post({ action: "remove", accessCode: "letmein", pat: "ghp_x", slackUserId: "U9" }),
+    );
+    expect(res.status).toBe(200);
+    expect(delSlackLink).toHaveBeenCalledWith("U9");
   });
 });
