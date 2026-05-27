@@ -18,7 +18,7 @@ function codeMatches(provided: string | undefined, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export async function handler(req: Request): Promise<Response> {
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   let cfg: Config;
@@ -68,3 +68,8 @@ export default async function handler(req: Request): Promise<Response> {
     return json(500, { error: "Storage error" });
   }
 }
+
+// Vercel reads a default export with a `fetch` method as a Web Handler
+// (Request -> Response). A bare default function would be treated as the
+// legacy (req, res) Node signature and its returned Response ignored.
+export default { fetch: handler };

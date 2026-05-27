@@ -11,7 +11,7 @@ vi.mock("../lib/github", () => ({
   getAuthenticatedLogin: vi.fn(async () => "Bob"),
 }));
 
-import handler from "../api/register";
+import { handler } from "../api/register";
 import { putPat, delPat, putSlackLink, delSlackLink } from "../lib/store";
 import { getAuthenticatedLogin } from "../lib/github";
 

@@ -18,7 +18,7 @@ vi.mock("../lib/store", () => ({
   ),
 }));
 
-import handler, { processApproval } from "../api/slack";
+import { handler, processApproval } from "../api/slack";
 import { approve, getPullRequest } from "../lib/github";
 import type { Config } from "../lib/config";
 

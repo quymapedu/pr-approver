@@ -94,7 +94,7 @@ async function postToSlack(responseUrl: string, text: string): Promise<void> {
   });
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export async function handler(req: Request): Promise<Response> {
   let cfg: Config;
   try {
     cfg = loadConfig();
@@ -142,3 +142,8 @@ export default async function handler(req: Request): Promise<Response> {
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }
+
+// Vercel reads a default export with a `fetch` method as a Web Handler
+// (Request -> Response). A bare default function would be treated as the
+// legacy (req, res) Node signature and its returned Response ignored.
+export default { fetch: handler };
