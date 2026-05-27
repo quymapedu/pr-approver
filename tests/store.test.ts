@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 
 const mem = new Map<string, string>(); // login -> ciphertext
+const links = new Map<string, string>(); // slack_user_id -> login
 
 // Minimal in-memory stand-in for Neon's direct-call form sql(text, params) -> rows[].
 const query = vi.fn(async (text: string, params: unknown[] = []) => {
@@ -20,6 +21,18 @@ const query = vi.fn(async (text: string, params: unknown[] = []) => {
   if (text.includes("SELECT login FROM pats")) {
     return [...mem.keys()].map((login) => ({ login }));
   }
+  if (text.includes("INSERT INTO slack_links")) {
+    links.set(params[0] as string, params[1] as string);
+    return [];
+  }
+  if (text.includes("SELECT login FROM slack_links")) {
+    const v = links.get(params[0] as string);
+    return v ? [{ login: v }] : [];
+  }
+  if (text.includes("DELETE FROM slack_links")) {
+    links.delete(params[0] as string);
+    return [];
+  }
   throw new Error(`unexpected query: ${text}`);
 });
 
@@ -27,12 +40,23 @@ vi.mock("@neondatabase/serverless", () => ({
   neon: vi.fn(() => query),
 }));
 
-import { putPat, getPat, delPat, listLogins } from "../lib/store";
+import {
+  putPat,
+  getPat,
+  delPat,
+  listLogins,
+  putSlackLink,
+  getLoginForSlack,
+  delSlackLink,
+} from "../lib/store";
 
 const key = randomBytes(32);
 
 describe("store", () => {
-  beforeEach(() => mem.clear());
+  beforeEach(() => {
+    mem.clear();
+    links.clear();
+  });
 
   it("stores and retrieves a PAT (encrypted at rest)", async () => {
     await putPat("Bob", "ghp_token", key);
@@ -68,5 +92,27 @@ describe("store", () => {
     await putPat("bob", "x", key);
     await putPat("carol", "y", key);
     expect((await listLogins()).sort()).toEqual(["bob", "carol"]);
+  });
+
+  it("stores and retrieves a Slack→login link (login lowercased)", async () => {
+    await putSlackLink("U123", "Bob");
+    expect(await getLoginForSlack("U123")).toBe("bob");
+  });
+
+  it("upserts a Slack link", async () => {
+    await putSlackLink("U123", "bob");
+    await putSlackLink("U123", "carol");
+    expect(await getLoginForSlack("U123")).toBe("carol");
+    expect(links.size).toBe(1);
+  });
+
+  it("returns null for an unknown Slack user", async () => {
+    expect(await getLoginForSlack("Unope")).toBeNull();
+  });
+
+  it("removes a Slack link", async () => {
+    await putSlackLink("U123", "bob");
+    await delSlackLink("U123");
+    expect(await getLoginForSlack("U123")).toBeNull();
   });
 });

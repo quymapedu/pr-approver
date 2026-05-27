@@ -39,3 +39,27 @@ export async function listLogins(): Promise<string[]> {
   const rows = (await db()(`SELECT login FROM pats`)) as { login: string }[];
   return rows.map((r) => r.login);
 }
+
+export async function putSlackLink(
+  slackUserId: string,
+  login: string,
+): Promise<void> {
+  await db()(
+    `INSERT INTO slack_links (slack_user_id, login) VALUES ($1, $2)
+     ON CONFLICT (slack_user_id) DO UPDATE SET login = EXCLUDED.login`,
+    [slackUserId, norm(login)],
+  );
+}
+
+export async function getLoginForSlack(
+  slackUserId: string,
+): Promise<string | null> {
+  const rows = (await db()(`SELECT login FROM slack_links WHERE slack_user_id = $1`, [
+    slackUserId,
+  ])) as { login: string }[];
+  return rows[0]?.login ?? null;
+}
+
+export async function delSlackLink(slackUserId: string): Promise<void> {
+  await db()(`DELETE FROM slack_links WHERE slack_user_id = $1`, [slackUserId]);
+}
