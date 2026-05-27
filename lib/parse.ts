@@ -17,6 +17,6 @@ export function extractMentions(body: string): string[] {
   return out;
 }
 
-export function containsTrigger(body: string, trigger: string): boolean {
-  return extractMentions(body).includes(trigger.toLowerCase());
+export function containsKeyword(body: string, keyword: string): boolean {
+  return stripCode(body).toLowerCase().includes(keyword.toLowerCase());
 }

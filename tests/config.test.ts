@@ -5,45 +5,44 @@ const key32Hex = "a".repeat(64); // 32 bytes in hex
 
 function fullEnv(): Record<string, string> {
   return {
-    APP_ID: "123",
-    APP_PRIVATE_KEY: "-----BEGIN KEY-----\\nabc\\n-----END KEY-----",
     WEBHOOK_SECRET: "whsec",
     ENCRYPTION_KEY: key32Hex,
     SETUP_ACCESS_CODE: "code",
+    BOT_PAT: "ghp_bot",
   };
 }
 
 describe("loadConfig", () => {
   it("loads required values and applies defaults", () => {
     const cfg = loadConfig(fullEnv());
-    expect(cfg.appId).toBe("123");
+    expect(cfg.botPat).toBe("ghp_bot");
     expect(cfg.webhookSecret).toBe("whsec");
     expect(cfg.setupAccessCode).toBe("code");
     expect(cfg.encryptionKey.length).toBe(32);
     expect(cfg.protectedBranches).toEqual(["main", "master"]);
-    expect(cfg.triggerMention).toBe("pr-approver-bot");
-  });
-
-  it("un-escapes \\n in the private key", () => {
-    const cfg = loadConfig(fullEnv());
-    expect(cfg.appPrivateKey).toContain("\n");
-    expect(cfg.appPrivateKey).not.toContain("\\n");
+    expect(cfg.triggerKeyword).toBe("/approve-as");
   });
 
   it("parses overrides", () => {
     const cfg = loadConfig({
       ...fullEnv(),
       PROTECTED_BRANCHES: "main, release/*, develop",
-      TRIGGER_MENTION: "@My-Bot",
+      TRIGGER_KEYWORD: "/approve",
     });
     expect(cfg.protectedBranches).toEqual(["main", "release/*", "develop"]);
-    expect(cfg.triggerMention).toBe("my-bot");
+    expect(cfg.triggerKeyword).toBe("/approve");
   });
 
   it("throws when a required var is missing", () => {
     const env = fullEnv();
     delete env.WEBHOOK_SECRET;
     expect(() => loadConfig(env)).toThrow(/WEBHOOK_SECRET/);
+  });
+
+  it("throws when BOT_PAT is missing", () => {
+    const env = fullEnv();
+    delete env.BOT_PAT;
+    expect(() => loadConfig(env)).toThrow(/BOT_PAT/);
   });
 
   it("throws on a wrong-length encryption key", () => {

@@ -1,6 +1,5 @@
 export interface DecideInput {
   mentions: string[];
-  botMention: string;
   author: string;
   baseRef: string;
   protectedBranches: string[];
@@ -16,7 +15,6 @@ export interface DecideResult {
 
 export function decide(input: DecideInput): DecideResult {
   const lc = (s: string) => s.toLowerCase();
-  const bot = lc(input.botMention);
   const author = lc(input.author);
   const base = lc(input.baseRef);
   const protectedBranches = input.protectedBranches.map(lc);
@@ -33,7 +31,7 @@ export function decide(input: DecideInput): DecideResult {
 
   const candidates: string[] = [];
   for (const m of input.mentions.map(lc)) {
-    if (m === bot || m === author) continue;
+    if (m === author) continue;
     if (!candidates.includes(m)) candidates.push(m);
   }
 

@@ -1,11 +1,10 @@
 export interface Config {
-  appId: string;
-  appPrivateKey: string;
   webhookSecret: string;
   encryptionKey: Buffer;
   setupAccessCode: string;
+  botPat: string;
   protectedBranches: string[];
-  triggerMention: string;
+  triggerKeyword: string;
 }
 
 function required(env: Record<string, string | undefined>, name: string): string {
@@ -29,18 +28,16 @@ export function loadConfig(
   env: Record<string, string | undefined> = process.env,
 ): Config {
   const protectedRaw = env.PROTECTED_BRANCHES ?? "main,master";
-  const trigger = (env.TRIGGER_MENTION ?? "pr-approver-bot").replace(/^@/, "");
 
   return {
-    appId: required(env, "APP_ID"),
-    appPrivateKey: required(env, "APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
     webhookSecret: required(env, "WEBHOOK_SECRET"),
     encryptionKey: parseKey(required(env, "ENCRYPTION_KEY")),
     setupAccessCode: required(env, "SETUP_ACCESS_CODE"),
+    botPat: required(env, "BOT_PAT"),
     protectedBranches: protectedRaw
       .split(",")
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
-    triggerMention: trigger.toLowerCase(),
+    triggerKeyword: (env.TRIGGER_KEYWORD ?? "/approve-as").trim(),
   };
 }

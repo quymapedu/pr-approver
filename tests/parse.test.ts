@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractMentions, containsTrigger } from "../lib/parse";
+import { extractMentions, containsKeyword } from "../lib/parse";
 
 describe("extractMentions", () => {
   it("extracts unique lowercased logins", () => {
@@ -29,14 +29,16 @@ describe("extractMentions", () => {
   });
 });
 
-describe("containsTrigger", () => {
-  it("is true when trigger login is mentioned (case-insensitive)", () => {
-    expect(containsTrigger("@PR-Approver-Bot go", "pr-approver-bot")).toBe(
-      true,
-    );
+describe("containsKeyword", () => {
+  it("is true when the keyword is present (case-insensitive)", () => {
+    expect(containsKeyword("please /Approve-As @bob", "/approve-as")).toBe(true);
   });
 
-  it("is false when trigger is absent", () => {
-    expect(containsTrigger("@someone-else", "pr-approver-bot")).toBe(false);
+  it("is false when the keyword is absent", () => {
+    expect(containsKeyword("just chatting @bob", "/approve-as")).toBe(false);
+  });
+
+  it("ignores the keyword inside inline code", () => {
+    expect(containsKeyword("docs say `/approve-as` does X", "/approve-as")).toBe(false);
   });
 });

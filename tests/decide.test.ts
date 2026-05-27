@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { decide } from "../lib/decide";
 
 const base = {
-  botMention: "pr-approver-bot",
   author: "alice",
   baseRef: "feature/x",
   protectedBranches: ["main", "master"],
@@ -10,8 +9,8 @@ const base = {
 };
 
 describe("decide", () => {
-  it("approves as registered, non-author, non-bot mentions", () => {
-    const r = decide({ ...base, mentions: ["pr-approver-bot", "bob", "carol"] });
+  it("approves as registered, non-author mentions", () => {
+    const r = decide({ ...base, mentions: ["bob", "carol"] });
     expect(r).toEqual({
       blocked: false,
       approveAs: ["bob", "carol"],
@@ -20,7 +19,7 @@ describe("decide", () => {
   });
 
   it("excludes the PR author", () => {
-    const r = decide({ ...base, mentions: ["pr-approver-bot", "alice", "bob"] });
+    const r = decide({ ...base, mentions: ["alice", "bob"] });
     expect(r.approveAs).toEqual(["bob"]);
   });
 
@@ -28,7 +27,7 @@ describe("decide", () => {
     const r = decide({
       ...base,
       baseRef: "main",
-      mentions: ["pr-approver-bot", "bob"],
+      mentions: ["bob"],
     });
     expect(r).toEqual({
       blocked: true,
@@ -42,24 +41,24 @@ describe("decide", () => {
     const r = decide({
       ...base,
       baseRef: "MAIN",
-      mentions: ["pr-approver-bot", "bob"],
+      mentions: ["bob"],
     });
     expect(r.blocked).toBe(true);
   });
 
   it("buckets mentioned-but-unregistered into skippedNoPat", () => {
-    const r = decide({ ...base, mentions: ["pr-approver-bot", "bob", "dan"] });
+    const r = decide({ ...base, mentions: ["bob", "dan"] });
     expect(r.approveAs).toEqual(["bob"]);
     expect(r.skippedNoPat).toEqual(["dan"]);
   });
 
   it("is case-insensitive on logins", () => {
-    const r = decide({ ...base, mentions: ["PR-Approver-Bot", "BOB"] });
+    const r = decide({ ...base, mentions: ["BOB"] });
     expect(r.approveAs).toEqual(["bob"]);
   });
 
-  it("returns empty approveAs when only the bot is mentioned", () => {
-    const r = decide({ ...base, mentions: ["pr-approver-bot"] });
+  it("returns empty approveAs when no one eligible is mentioned", () => {
+    const r = decide({ ...base, mentions: [] });
     expect(r.approveAs).toEqual([]);
     expect(r.skippedNoPat).toEqual([]);
   });
