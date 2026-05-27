@@ -1,42 +1,39 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig } from "../lib/config";
 
-const key32Hex = "a".repeat(64); // 32 bytes in hex
+const key32Hex = "a".repeat(64);
 
 function fullEnv(): Record<string, string> {
   return {
-    WEBHOOK_SECRET: "whsec",
+    SLACK_SIGNING_SECRET: "slacksecret",
+    BOT_PAT: "ghp_bot",
     ENCRYPTION_KEY: key32Hex,
     SETUP_ACCESS_CODE: "code",
-    BOT_PAT: "ghp_bot",
   };
 }
 
 describe("loadConfig", () => {
   it("loads required values and applies defaults", () => {
     const cfg = loadConfig(fullEnv());
+    expect(cfg.slackSigningSecret).toBe("slacksecret");
     expect(cfg.botPat).toBe("ghp_bot");
-    expect(cfg.webhookSecret).toBe("whsec");
     expect(cfg.setupAccessCode).toBe("code");
     expect(cfg.encryptionKey.length).toBe(32);
     expect(cfg.protectedBranches).toEqual(["main", "master"]);
-    expect(cfg.triggerKeyword).toBe("/approve-as");
   });
 
-  it("parses overrides", () => {
+  it("parses PROTECTED_BRANCHES override", () => {
     const cfg = loadConfig({
       ...fullEnv(),
       PROTECTED_BRANCHES: "main, release/*, develop",
-      TRIGGER_KEYWORD: "/approve",
     });
     expect(cfg.protectedBranches).toEqual(["main", "release/*", "develop"]);
-    expect(cfg.triggerKeyword).toBe("/approve");
   });
 
-  it("throws when a required var is missing", () => {
+  it("throws when SLACK_SIGNING_SECRET is missing", () => {
     const env = fullEnv();
-    delete env.WEBHOOK_SECRET;
-    expect(() => loadConfig(env)).toThrow(/WEBHOOK_SECRET/);
+    delete env.SLACK_SIGNING_SECRET;
+    expect(() => loadConfig(env)).toThrow(/SLACK_SIGNING_SECRET/);
   });
 
   it("throws when BOT_PAT is missing", () => {
