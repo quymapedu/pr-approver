@@ -59,6 +59,12 @@ export function parsePrRef(text: string, defaultOwner: string): PrRef | null {
   return null;
 }
 
+// True if the message carries the `--dangerously-skip-permissions` escape hatch,
+// which overrides the protected-branch safeguard.
+export function parseSkipPermissions(text: string): boolean {
+  return /--dangerously-skip-permissions\b/i.test(text);
+}
+
 export function parseSlackUserIds(text: string): string[] {
   const out: string[] = [];
   for (const m of text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g)) {

@@ -4,6 +4,9 @@ export interface DecideInput {
   baseRef: string;
   protectedBranches: string[];
   registeredLogins: string[];
+  // When true, the protected-branch safeguard is bypassed
+  // (--dangerously-skip-permissions).
+  skipProtected?: boolean;
 }
 
 export interface DecideResult {
@@ -20,7 +23,7 @@ export function decide(input: DecideInput): DecideResult {
   const protectedBranches = input.protectedBranches.map(lc);
   const registered = new Set(input.registeredLogins.map(lc));
 
-  if (protectedBranches.includes(base)) {
+  if (!input.skipProtected && protectedBranches.includes(base)) {
     return {
       blocked: true,
       blockedBranch: input.baseRef,

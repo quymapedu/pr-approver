@@ -37,6 +37,20 @@ describe("decide", () => {
     });
   });
 
+  it("bypasses the protected-branch block when skipProtected is set", () => {
+    const r = decide({
+      ...base,
+      baseRef: "main",
+      mentions: ["bob", "carol"],
+      skipProtected: true,
+    });
+    expect(r).toEqual({
+      blocked: false,
+      approveAs: ["bob", "carol"],
+      skippedNoPat: [],
+    });
+  });
+
   it("matches protected branch case-insensitively", () => {
     const r = decide({
       ...base,

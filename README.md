@@ -25,7 +25,10 @@ The bot resolves each tagged Slack user to their linked GitHub login and submits
 an approving review **as each of them**, then replies in-thread with a summary.
 
 > **Safeguard:** the bot never approves PRs whose base branch is protected
-> (default `main`, `master`).
+> (default `main`, `master`). To override it for a single request, add
+> `--dangerously-skip-permissions` anywhere in the mention — the PR is then
+> approved even when its base is protected. Anyone who can mention the bot can
+> use this flag, so reach for it sparingly.
 
 > **Trust note:** anyone who can mention the bot can cause an approving review
 > to be submitted as a colleague who registered a PAT. Use only within a

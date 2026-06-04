@@ -4,6 +4,7 @@ import {
   verifySlackSignature,
   parsePrRef,
   parseSlackUserIds,
+  parseSkipPermissions,
   type PrRef,
 } from "../lib/slack.js";
 import { decide } from "../lib/decide.js";
@@ -22,6 +23,8 @@ interface ProcessInput {
   cfg: Config;
   // Absolute base URL of this deployment, so /setup links are clickable.
   appBaseUrl: string;
+  // --dangerously-skip-permissions: bypass the protected-branch safeguard.
+  skipProtected?: boolean;
 }
 
 // A PR reference is either fully specified (owner/repo/number) or just a number
@@ -78,7 +81,7 @@ async function resolveTarget(
 }
 
 export async function processApproval(input: ProcessInput): Promise<string> {
-  const { ref, slackUserIds, cfg, appBaseUrl } = input;
+  const { ref, slackUserIds, cfg, appBaseUrl, skipProtected } = input;
   const setup = appBaseUrl ? `${appBaseUrl}/setup` : "/setup";
   if (!ref) {
     return `⚠️ I couldn't find a PR. Mention me with a PR and reviewers, e.g. \`@approver 1164 @bob\` (or a full URL / \`repo/pull/N\`).`;
@@ -133,6 +136,7 @@ export async function processApproval(input: ProcessInput): Promise<string> {
     baseRef,
     protectedBranches: cfg.protectedBranches,
     registeredLogins,
+    skipProtected,
   });
 
   if (result.blocked) {
@@ -271,6 +275,7 @@ export async function handler(req: Request): Promise<Response> {
     const ref = parsePrRef(text, cfg.defaultOwner);
     // Drop the bot's own mention so it isn't treated as a reviewer.
     const slackUserIds = parseSlackUserIds(text).filter((id) => id !== botUserId);
+    const skipProtected = parseSkipPermissions(text);
     const channel = event.channel ?? "";
     const threadTs = event.thread_ts ?? event.ts ?? "";
     const appBaseUrl = baseUrl(req);
@@ -279,7 +284,7 @@ export async function handler(req: Request): Promise<Response> {
     await waitUntil(
       (async () => {
         try {
-          const summary = await processApproval({ ref, slackUserIds, cfg, appBaseUrl });
+          const summary = await processApproval({ ref, slackUserIds, cfg, appBaseUrl, skipProtected });
           if (channel) await postSlackMessage(cfg.slackBotToken, channel, threadTs, summary);
         } catch (err) {
           console.error("slack approval failed:", err);

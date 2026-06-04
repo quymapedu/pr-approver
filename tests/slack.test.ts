@@ -4,6 +4,7 @@ import {
   verifySlackSignature,
   parsePrRef,
   parseSlackUserIds,
+  parseSkipPermissions,
 } from "../lib/slack";
 
 const OWNER = "mapEDU-AI";
@@ -92,5 +93,22 @@ describe("parseSlackUserIds", () => {
   });
   it("returns [] when there are no mentions", () => {
     expect(parseSlackUserIds("just text")).toEqual([]);
+  });
+});
+
+describe("parseSkipPermissions", () => {
+  it("detects the flag anywhere in the text", () => {
+    expect(
+      parseSkipPermissions("approve 1164 @bob --dangerously-skip-permissions"),
+    ).toBe(true);
+  });
+  it("is case-insensitive", () => {
+    expect(parseSkipPermissions("--DANGEROUSLY-SKIP-PERMISSIONS")).toBe(true);
+  });
+  it("is false when the flag is absent", () => {
+    expect(parseSkipPermissions("approve 1164 @bob")).toBe(false);
+  });
+  it("does not match a substring without the leading dashes", () => {
+    expect(parseSkipPermissions("dangerously-skip-permissions")).toBe(false);
   });
 });

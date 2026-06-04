@@ -124,6 +124,19 @@ describe("processApproval", () => {
     expect(summary.toLowerCase()).toContain("main");
   });
 
+  it("approves a protected base branch when skipProtected is set", async () => {
+    (getPullRequest as any).mockResolvedValueOnce({ author: "alice", baseRef: "main" });
+    const summary = await processApproval({
+      ref: { owner: "org", repo: "repo", number: 7 },
+      slackUserIds: ["U01BOB"],
+      cfg,
+      appBaseUrl: "",
+      skipProtected: true,
+    });
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(summary).toContain("@bob");
+  });
+
   it("returns a usage hint when no PR reference", async () => {
     const summary = await processApproval({
       ref: null,
@@ -272,6 +285,17 @@ describe("slack events handler", () => {
     const posted = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(posted.channel).toBe("C123");
     expect(posted.thread_ts).toBe("1700000000.000100");
+    expect(posted.text).toContain("@bob");
+  });
+
+  it("bypasses the protected-branch block when the mention carries the flag", async () => {
+    (getPullRequest as any).mockResolvedValueOnce({ author: "alice", baseRef: "main" });
+    const res = await handler(
+      mention(`<@U0BOT> ${PR} <@U01BOB> --dangerously-skip-permissions`),
+    );
+    expect(res.status).toBe(200);
+    expect(approve).toHaveBeenCalledTimes(1);
+    const posted = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body as string);
     expect(posted.text).toContain("@bob");
   });
 
