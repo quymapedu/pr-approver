@@ -225,6 +225,7 @@ interface SlackEventBody {
     ts?: string;
     thread_ts?: string;
     bot_id?: string;
+    user?: string;
   };
 }
 
@@ -272,9 +273,11 @@ export async function handler(req: Request): Promise<Response> {
   if (event?.type === "app_mention" && !event.bot_id) {
     const text = event.text ?? "";
     const botUserId = body.authorizations?.[0]?.user_id;
-    const ref = parsePrRef(text, cfg.defaultOwner);
+    let ref = parsePrRef(text, cfg.defaultOwner);
     // Drop the bot's own mention so it isn't treated as a reviewer.
-    const slackUserIds = parseSlackUserIds(text).filter((id) => id !== botUserId);
+    const tagged = parseSlackUserIds(text).filter((id) => id !== botUserId);
+    // No reviewers tagged? Approve as whoever mentioned the bot.
+    const slackUserIds = tagged.length ? tagged : event.user ? [event.user] : [];
     const skipProtected = parseSkipPermissions(text);
     const channel = event.channel ?? "";
     const threadTs = event.thread_ts ?? event.ts ?? "";

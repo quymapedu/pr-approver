@@ -69,16 +69,22 @@ function signed(rawBody: string, retryNum?: string): Request {
 }
 
 // Build a signed app_mention event request.
-function mention(text: string, opts: { botUserId?: string } = {}): Request {
+function mention(
+  text: string,
+  opts: { botUserId?: string; user?: string; threadTs?: string } = {},
+): Request {
+  const event: Record<string, unknown> = {
+    type: "app_mention",
+    text,
+    channel: "C123",
+    ts: "1700000000.000100",
+    user: opts.user ?? "U0SENDER",
+  };
+  if (opts.threadTs) event.thread_ts = opts.threadTs;
   const body = JSON.stringify({
     type: "event_callback",
     authorizations: [{ user_id: opts.botUserId ?? "U0BOT" }],
-    event: {
-      type: "app_mention",
-      text,
-      channel: "C123",
-      ts: "1700000000.000100",
-    },
+    event,
   });
   return signed(body);
 }
@@ -306,6 +312,15 @@ describe("slack events handler", () => {
     expect(approve).toHaveBeenCalledTimes(1);
     const posted = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body as string);
     expect(posted.text).not.toContain("U0BOT");
+  });
+
+  it("approves as the sender when no reviewer is tagged", async () => {
+    const res = await handler(mention(`<@U0BOT> ${PR} approve this`, { user: "U01BOB" }));
+    expect(res.status).toBe(200);
+    // The sender (bob) is used even though nobody was tagged.
+    expect(approve).toHaveBeenCalledTimes(1);
+    const posted = JSON.parse((globalThis.fetch as any).mock.calls.at(-1)[1].body as string);
+    expect(posted.text).toContain("@bob");
   });
 
   it("ignores Slack retries without reprocessing", async () => {
