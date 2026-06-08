@@ -323,6 +323,41 @@ describe("slack events handler", () => {
     expect(posted.text).toContain("@bob");
   });
 
+  it("resolves the PR from the thread when the mention omits it", async () => {
+    // Branch the fetch mock: thread fetch returns a GitHub-app message, the
+    // reply post returns ok.
+    (globalThis.fetch as any).mockImplementation((url: string) =>
+      Promise.resolve(
+        typeof url === "string" && url.includes("conversations.replies")
+          ? new Response(
+              JSON.stringify({
+                ok: true,
+                messages: [
+                  {
+                    text: "Pull request opened by Kien",
+                    attachments: [{ title_link: "https://github.com/org/repo/pull/7" }],
+                  },
+                ],
+              }),
+            )
+          : new Response(JSON.stringify({ ok: true })),
+      ),
+    );
+
+    const res = await handler(
+      mention("<@U0BOT> approve this PR", {
+        user: "U01BOB",
+        threadTs: "1700000000.000050",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve).toHaveBeenCalledWith(expect.anything(), "org", "repo", 7);
+    const posted = JSON.parse((globalThis.fetch as any).mock.calls.at(-1)[1].body as string);
+    expect(posted.text).toContain("<https://github.com/org/repo/pull/7|#7>");
+  });
+
   it("ignores Slack retries without reprocessing", async () => {
     const body = JSON.stringify({
       type: "event_callback",

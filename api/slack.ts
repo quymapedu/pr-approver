@@ -8,6 +8,7 @@ import {
   type PrRef,
 } from "../lib/slack.js";
 import { decide } from "../lib/decide.js";
+import { resolvePrFromThread } from "../lib/slack-thread.js";
 import { listLogins, getPat, getLoginForSlack } from "../lib/store.js";
 import {
   clientForToken,
@@ -287,6 +288,16 @@ export async function handler(req: Request): Promise<Response> {
     await waitUntil(
       (async () => {
         try {
+          // No PR in the mention? Look in the thread it was posted in. Replies
+          // need a real thread_ts (event.ts is the mention itself, not a thread).
+          if (!ref && event.thread_ts && channel) {
+            ref = await resolvePrFromThread(
+              cfg.slackBotToken,
+              channel,
+              event.thread_ts,
+              cfg.defaultOwner,
+            );
+          }
           const summary = await processApproval({ ref, slackUserIds, cfg, appBaseUrl, skipProtected });
           if (channel) await postSlackMessage(cfg.slackBotToken, channel, threadTs, summary);
         } catch (err) {
