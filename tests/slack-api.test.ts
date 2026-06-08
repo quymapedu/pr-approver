@@ -358,6 +358,143 @@ describe("slack events handler", () => {
     expect(posted.text).toContain("<https://github.com/org/repo/pull/7|#7>");
   });
 
+  it("resolves the PR from recent channel history for a top-level mention", async () => {
+    // No thread_ts: the bot can't read a thread, so it scans channel history and
+    // uses the most recent GitHub PR notification.
+    (globalThis.fetch as any).mockImplementation((url: string) =>
+      Promise.resolve(
+        typeof url === "string" && url.includes("conversations.history")
+          ? new Response(
+              JSON.stringify({
+                ok: true,
+                messages: [
+                  { user: "U01BOB", text: "<@U0BOT> approve" },
+                  {
+                    text: "Pull request opened by Kien",
+                    attachments: [{ title_link: "https://github.com/org/repo/pull/7" }],
+                  },
+                ],
+              }),
+            )
+          : new Response(JSON.stringify({ ok: true })),
+      ),
+    );
+
+    const res = await handler(mention("<@U0BOT> approve", { user: "U01BOB" }));
+
+    expect(res.status).toBe(200);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve).toHaveBeenCalledWith(expect.anything(), "org", "repo", 7);
+    // History is anchored to the mention's ts so a PR opened *after* it can't win.
+    const historyCall = (globalThis.fetch as any).mock.calls.find(
+      (c: any) => typeof c[0] === "string" && c[0].includes("conversations.history"),
+    );
+    expect(historyCall[0]).toContain("latest=1700000000.000100");
+    const posted = JSON.parse((globalThis.fetch as any).mock.calls.at(-1)[1].body as string);
+    expect(posted.text).toContain("<https://github.com/org/repo/pull/7|#7>");
+  });
+
+  it("excludes the bot's own post (resolved via auth.test bot_id) from history", async () => {
+    // End-to-end: the bot learns its bot_id from auth.test, then a prior bot
+    // message carrying a full PR URL must not be counted — otherwise one real PR
+    // would look like "multiple PRs" and the bot would refuse.
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("auth.test")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, user_id: "U0BOT", bot_id: "B_SELF" })),
+        );
+      }
+      if (typeof url === "string" && url.includes("conversations.history")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ok: true,
+              messages: [
+                { bot_id: "B_SELF", text: "earlier I approved github.com/org/repo/pull/9" },
+                { attachments: [{ title_link: "https://github.com/org/repo/pull/7" }] },
+              ],
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+
+    const res = await handler(mention("<@U0BOT> approve", { user: "U01BOB" }));
+
+    expect(res.status).toBe(200);
+    // Resolves to the single real PR (#7); the bot's own #9 mention is ignored.
+    expect(approve).toHaveBeenCalledWith(expect.anything(), "org", "repo", 7);
+  });
+
+  it("refuses to guess when channel history holds multiple distinct PRs", async () => {
+    (globalThis.fetch as any).mockImplementation((url: string) =>
+      Promise.resolve(
+        typeof url === "string" && url.includes("conversations.history")
+          ? new Response(
+              JSON.stringify({
+                ok: true,
+                messages: [
+                  { attachments: [{ title_link: "https://github.com/org/repo/pull/7" }] },
+                  { attachments: [{ title_link: "https://github.com/org/repo/pull/9" }] },
+                ],
+              }),
+            )
+          : new Response(JSON.stringify({ ok: true })),
+      ),
+    );
+
+    const res = await handler(mention("<@U0BOT> approve", { user: "U01BOB" }));
+
+    expect(res.status).toBe(200);
+    expect(approve).not.toHaveBeenCalled();
+    const posted = JSON.parse((globalThis.fetch as any).mock.calls.at(-1)[1].body as string);
+    expect(posted.text.toLowerCase()).toContain("multiple");
+    // Lists both candidates so the user can pick one.
+    expect(posted.text).toContain("pull/7");
+    expect(posted.text).toContain("pull/9");
+  });
+
+  it("falls back to channel history when the thread holds no PR", async () => {
+    // Mention is in a thread rooted at a human message (no PR there), so the bot
+    // must fall through to channel history to find the PR notification.
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("conversations.replies")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ok: true,
+              messages: [{ user: "U01BOB", text: "<@U0BOT> approve thsi" }],
+            }),
+          ),
+        );
+      }
+      if (typeof url === "string" && url.includes("conversations.history")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ok: true,
+              messages: [
+                {
+                  text: "Pull request opened by Kien",
+                  attachments: [{ title_link: "https://github.com/org/repo/pull/7" }],
+                },
+              ],
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+
+    const res = await handler(
+      mention("<@U0BOT> approve", { user: "U01BOB", threadTs: "1700000000.000050" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(approve).toHaveBeenCalledWith(expect.anything(), "org", "repo", 7);
+  });
+
   it("ignores Slack retries without reprocessing", async () => {
     const body = JSON.stringify({
       type: "event_callback",

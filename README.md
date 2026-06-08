@@ -25,11 +25,23 @@ it's used; if several do, the bot asks you to name the repo.
 The bot resolves each tagged Slack user to their linked GitHub login and submits
 an approving review **as each of them**, then replies in-thread with a summary.
 
-When you mention the bot **inside the Slack thread of a GitHub PR notification**
-without a PR reference, it reads the thread and uses the PR it's about. And when
-you tag no reviewers, it approves as **you** (the person who mentioned it) — so
-the shortest form is just `@approver approve this PR`. Tagging reviewers
-explicitly still approves as exactly those people instead.
+When you mention the bot without a PR reference, it figures out which PR you
+mean from context:
+
+1. If you're **replying in a thread**, it reads the thread and uses the PR the
+   root is about (where GitHub's PR notification usually sits).
+2. Otherwise — a **fresh top-level mention**, or a thread not rooted at a PR — it
+   looks at the channel's recent history (only at or before your mention, so a
+   PR opened later can't be picked). If exactly **one** GitHub PR notification is
+   there, it uses that PR; if **several** are, it **refuses to guess** and lists
+   them, asking you to reply in the PR's thread or name the PR. It never approves
+   on a bare number typed in chat.
+
+The bot ignores its own messages while doing this, so its usage hints can't be
+mistaken for the PR you meant. And when you tag no reviewers, it approves as
+**you** (the person who mentioned it) — so the shortest form is just
+`@approver approve this PR`. Tagging reviewers explicitly still approves as
+exactly those people instead.
 
 > **Safeguard:** the bot never approves PRs whose base branch is protected
 > (default `main`, `master`). To override it for a single request, add
@@ -70,9 +82,10 @@ explicitly still approves as exactly those people instead.
 - api.slack.com/apps → Create New App → From scratch → pick your workspace.
 - **OAuth & Permissions → Bot Token Scopes** → add `app_mentions:read`,
   `chat:write`, `channels:history`, and `groups:history`. The two `*:history`
-  scopes let the bot read a PR thread to find the PR when you don't type its
-  number (`groups:history` covers private channels). If you add these to an
-  already-installed app, **reinstall to the workspace** to grant them.
+  scopes let the bot read a PR thread — or recent channel history — to find the
+  PR when you don't type its number (`groups:history` covers private channels).
+  If you add these to an already-installed app, **reinstall to the workspace**
+  to grant them.
 - **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`) —
   this is `SLACK_BOT_TOKEN`.
 - **Basic Information → App Credentials → Signing Secret** → this is `SLACK_SIGNING_SECRET`.

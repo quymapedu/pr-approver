@@ -8,7 +8,11 @@ import {
   type PrRef,
 } from "../lib/slack.js";
 import { decide } from "../lib/decide.js";
-import { resolvePrFromThread } from "../lib/slack-thread.js";
+import {
+  resolvePrFromThread,
+  resolvePrFromChannel,
+  fetchBotIdentity,
+} from "../lib/slack-thread.js";
 import { listLogins, getPat, getLoginForSlack } from "../lib/store.js";
 import {
   clientForToken,
@@ -187,6 +191,18 @@ export async function processApproval(input: ProcessInput): Promise<string> {
   return lines.join("\n");
 }
 
+// Several PRs are in scope and the mention named none — list them rather than
+// risk approving the wrong one.
+function ambiguousPrMessage(candidates: PrRef[]): string {
+  const list = candidates
+    .map((c) => `\`${c.owner}/${c.repo}/pull/${c.number}\``)
+    .join(", ");
+  return (
+    `⚠️ I found multiple recent PRs and won't guess which to approve: ${list}. ` +
+    `Reply in the PR's thread, or mention me with the PR (number or URL).`
+  );
+}
+
 // Post a reply in the channel, threaded under the triggering message.
 async function postSlackMessage(
   botToken: string,
@@ -218,6 +234,7 @@ function baseUrl(req: Request): string {
 interface SlackEventBody {
   type?: string;
   challenge?: string;
+  api_app_id?: string;
   authorizations?: { user_id?: string }[];
   event?: {
     type?: string;
@@ -288,17 +305,46 @@ export async function handler(req: Request): Promise<Response> {
     await waitUntil(
       (async () => {
         try {
-          // No PR in the mention? Look in the thread it was posted in. Replies
-          // need a real thread_ts (event.ts is the mention itself, not a thread).
-          if (!ref && event.thread_ts && channel) {
-            ref = await resolvePrFromThread(
-              cfg.slackBotToken,
-              channel,
-              event.thread_ts,
-              cfg.defaultOwner,
-            );
+          // No PR in the mention? Find it from context — but first learn the
+          // bot's own identity (bot_id via auth.test, plus the user/app id from
+          // the event) so its own posts are excluded from every scan.
+          let summary: string;
+          if (!ref && channel) {
+            const self = await fetchBotIdentity(cfg.slackBotToken);
+            if (botUserId && !self.userId) self.userId = botUserId;
+            self.appId = body.api_app_id;
+
+            // First the thread it was posted in (replies need a real thread_ts —
+            // event.ts is the mention itself, not a thread); its root is usually
+            // the PR notification.
+            if (event.thread_ts) {
+              ref = await resolvePrFromThread(
+                cfg.slackBotToken,
+                channel,
+                event.thread_ts,
+                cfg.defaultOwner,
+                self,
+              );
+            }
+            // Still nothing — a top-level mention (no thread) or a thread not
+            // rooted at a PR notification. Look in the channel's recent history,
+            // but only act on a single unambiguous PR: with several we refuse to
+            // guess (approving the wrong PR is worse than asking).
+            if (!ref) {
+              const resolution = await resolvePrFromChannel(
+                cfg.slackBotToken,
+                channel,
+                cfg.defaultOwner,
+                self,
+                event.ts,
+              );
+              if (resolution.kind === "found") ref = resolution.ref;
+              else if (resolution.kind === "ambiguous") {
+                summary = ambiguousPrMessage(resolution.candidates);
+              }
+            }
           }
-          const summary = await processApproval({ ref, slackUserIds, cfg, appBaseUrl, skipProtected });
+          summary ??= await processApproval({ ref, slackUserIds, cfg, appBaseUrl, skipProtected });
           if (channel) await postSlackMessage(cfg.slackBotToken, channel, threadTs, summary);
         } catch (err) {
           console.error("slack approval failed:", err);
