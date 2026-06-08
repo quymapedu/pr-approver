@@ -5,7 +5,8 @@ using each reviewer's own Personal Access Token. Trigger it by **@-mentioning
 the bot** in any channel it's in:
 
 ```
-@approver https://github.com/org/repo/pull/123 @bob @carol
+@approver https://github.com/org/repo/pull/123 @bob @carol   # explicit
+@approver approve this PR                                     # in a PR thread: resolves the PR from the thread, approves as you
 ```
 
 The PR can be given several ways (shortest wins for typing speed):
@@ -23,6 +24,12 @@ it's used; if several do, the bot asks you to name the repo.
 
 The bot resolves each tagged Slack user to their linked GitHub login and submits
 an approving review **as each of them**, then replies in-thread with a summary.
+
+When you mention the bot **inside the Slack thread of a GitHub PR notification**
+without a PR reference, it reads the thread and uses the PR it's about. And when
+you tag no reviewers, it approves as **you** (the person who mentioned it) — so
+the shortest form is just `@approver approve this PR`. Tagging reviewers
+explicitly still approves as exactly those people instead.
 
 > **Safeguard:** the bot never approves PRs whose base branch is protected
 > (default `main`, `master`). To override it for a single request, add
@@ -61,8 +68,11 @@ an approving review **as each of them**, then replies in-thread with a summary.
 ### 2. Create the Slack app
 
 - api.slack.com/apps → Create New App → From scratch → pick your workspace.
-- **OAuth & Permissions → Bot Token Scopes** → add `app_mentions:read` and
-  `chat:write`.
+- **OAuth & Permissions → Bot Token Scopes** → add `app_mentions:read`,
+  `chat:write`, `channels:history`, and `groups:history`. The two `*:history`
+  scopes let the bot read a PR thread to find the PR when you don't type its
+  number (`groups:history` covers private channels). If you add these to an
+  already-installed app, **reinstall to the workspace** to grant them.
 - **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`) —
   this is `SLACK_BOT_TOKEN`.
 - **Basic Information → App Credentials → Signing Secret** → this is `SLACK_SIGNING_SECRET`.
